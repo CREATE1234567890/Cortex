@@ -206,24 +206,39 @@ input:focus, textarea:focus { border-color: var(--accent); }
 .chat-input-box button { align-self: flex-end; height: 36px; }
 .send-btn { white-space: nowrap; min-width: 76px; }
 
-/* 原文面板收起后的重开按钮 */
-.pdf-reopen {
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  writing-mode: vertical-rl;
-  padding: 14px 6px;
-  border-radius: 10px 0 0 10px;
-  border-right: none;
+/* 右侧常驻窄条：原文面板开合（IDE 侧栏式） */
+.pdf-rail {
+  width: 34px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
   background: var(--panel);
-  box-shadow: -2px 0 8px rgba(16, 24, 40, 0.08);
-  font-size: 12px;
-  letter-spacing: 2px;
-  color: var(--text-2);
-  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 12px;
+  gap: 12px;
+  cursor: pointer;
+  user-select: none;
 }
-.pdf-reopen:hover { color: var(--accent-deep); background: var(--accent-soft); }
+.pdf-rail:hover { background: #f7f8fa; }
+.pdf-rail-icon {
+  font-size: 15px;
+  color: var(--text-2);
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+}
+.pdf-rail:hover .pdf-rail-icon {
+  color: var(--accent-deep);
+  background: var(--accent-soft);
+}
+.pdf-rail-doc {
+  font-size: 14px;
+  writing-mode: vertical-rl;
+  letter-spacing: 2px;
+  color: var(--text-3);
+}
 
 .msg { margin-bottom: 22px; }
 .msg .role {

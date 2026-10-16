@@ -31,7 +31,7 @@ export default function ChatPage() {
   const [docFilter, setDocFilter] = useState<string[]>([]);
   const [docs, setDocs] = useState<{ id: string; title: string; status: string }[]>([]);
   const [pdfTarget, setPdfTarget] = useState<PdfTarget | null>(null);
-  const [pdfOpen, setPdfOpen] = useState(true);
+  const [pdfOpen, setPdfOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
   // 流式渲染节流：delta 先进缓冲区，最多 80ms 刷一次 UI
@@ -290,14 +290,16 @@ export default function ChatPage() {
           </div>
         </div>
 
-        {/* PDF 阅读器 */}
-        {pdfOpen ? (
-          <PdfViewer target={pdfTarget} onClose={() => setPdfOpen(false)} />
-        ) : (
-          <button className="pdf-reopen" onClick={() => setPdfOpen(true)} title="打开原文面板">
-            📄<br />原<br />文
-          </button>
-        )}
+        {/* PDF 原文面板：右侧常驻窄条控制开合（IDE 侧栏式） */}
+        {pdfOpen && <PdfViewer target={pdfTarget} />}
+        <div
+          className="pdf-rail"
+          onClick={() => setPdfOpen(o => !o)}
+          title={pdfOpen ? "收起原文面板" : "打开原文面板"}
+        >
+          <span className="pdf-rail-icon">{pdfOpen ? "»" : "«"}</span>
+          <span className="pdf-rail-doc">📄</span>
+        </div>
       </div>
     </div>
   );
