@@ -8,8 +8,16 @@ export default function SettingsPage() {
   const [msg, setMsg] = useState("");
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState("");
+  const [memories, setMemories] = useState<{ id: number; kind: string; content: string; created_at: string }[]>([]);
+  const [memEnabled, setMemEnabled] = useState(true);
 
-  useEffect(() => { api.settings().then(setS).catch(() => {}); }, []);
+  const loadMemories = () => {
+    api.memories().then(r => { setMemories(r.items); setMemEnabled(r.enabled); }).catch(() => {});
+  };
+  useEffect(() => {
+    api.settings().then(setS).catch(() => {});
+    loadMemories();
+  }, []);
 
   const toast = (t: string) => { setMsg(t); setTimeout(() => setMsg(""), 3000); };
 
@@ -99,6 +107,58 @@ export default function SettingsPage() {
           <div style={{ fontSize: 13, color: "var(--text-2)" }}>
             当前：<code>{String(s.embed_model ?? "…")}</code>（本地 CPU 推理，更换模型需重建索引，第一版暂不支持在线切换）
           </div>
+        </div>
+
+        <div className="card">
+          <h3>长期记忆</h3>
+          <div className="row" style={{ marginBottom: 10 }}>
+            <label className="checkbox-row">
+              <input
+                type="checkbox" checked={memEnabled}
+                onChange={async e => {
+                  setMemEnabled(e.target.checked);
+                  await api.toggleMemory(e.target.checked);
+                  toast(e.target.checked ? "已开启记忆" : "已关闭记忆");
+                }}
+              />
+              开启：从对话中沉淀你的研究方向与偏好，提问时自动参考
+            </label>
+            <span style={{ flex: 1 }} />
+            <button
+              className="small danger"
+              onClick={async () => {
+                if (!window.confirm("确定清空全部长期记忆吗？")) return;
+                await api.clearMemories();
+                loadMemories();
+                toast("已清空");
+              }}
+              disabled={!memories.length}
+            >清空记忆</button>
+          </div>
+          {memories.length === 0 ? (
+            <div style={{ fontSize: 13, color: "var(--text-3)", padding: "8px 0" }}>
+              还没有记忆。多问几轮后，Cortex 会自动记住你的研究方向与偏好（此处的记忆只保存在本机）。
+            </div>
+          ) : (
+            <table className="tbl">
+              <thead><tr><th style={{ width: 110 }}>类型</th><th>内容</th><th style={{ width: 40 }}></th></tr></thead>
+              <tbody>
+                {memories.map(m => (
+                  <tr key={m.id}>
+                    <td><span className="badge pending">{m.kind}</span></td>
+                    <td>{m.content}</td>
+                    <td>
+                      <button
+                        className="small danger"
+                        style={{ border: "none", background: "transparent" }}
+                        onClick={async () => { await api.deleteMemory(m.id); loadMemories(); }}
+                      >✕</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
 
         <div className="row">

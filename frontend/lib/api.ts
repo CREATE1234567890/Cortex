@@ -55,6 +55,11 @@ export interface IngestJob {
   message: string | null;
 }
 
+export interface ToolInfo {
+  query: string;
+  added: number | null;   // null = start 阶段
+}
+
 async function j<T>(resOrPromise: Response | Promise<Response>): Promise<T> {
   const res = await resOrPromise;
   if (!res.ok) {
@@ -112,6 +117,21 @@ export const api = {
       fetch(`${API}/api/settings/test-llm`, { method: "POST" })),
   pdfUrl: (docId: string) => `${API}/api/documents/${docId}/pdf`,
 
+  /** 长期记忆 */
+  memories: () =>
+    j<{ enabled: boolean; items: { id: number; kind: string; content: string; created_at: string }[] }>(
+      fetch(`${API}/api/memories`)),
+  deleteMemory: (id: number) =>
+    fetch(`${API}/api/memories/${id}`, { method: "DELETE" }),
+  clearMemories: () =>
+    fetch(`${API}/api/memories/clear`, { method: "POST" }),
+  toggleMemory: (enabled: boolean) =>
+    fetch(`${API}/api/memories/toggle`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    }),
+
   /** SSE 流式问答；onEvent 按 event 类型回调 */
   chat(
     question: string,
@@ -120,6 +140,7 @@ export const api = {
     handlers: {
       onMeta?: (conversationId: string) => void;
       onEvidence?: (evidences: EvidenceInfo[], llmReady: boolean) => void;
+      onTool?: (info: ToolInfo & { phase: string; evidences?: EvidenceInfo[]; total?: number }) => void;
       onDelta?: (text: string) => void;
       onCitations?: (citations: Citation[]) => void;
       onDone?: (info: { refused: boolean }) => void;
@@ -161,6 +182,11 @@ export const api = {
             case "evidence": {
               const d = data as { evidences: EvidenceInfo[]; llm_ready: boolean };
               handlers.onEvidence?.(d.evidences, d.llm_ready);
+              break;
+            }
+            case "tool": {
+              const d = data as { phase: string; query: string; added?: number; evidences?: EvidenceInfo[]; total?: number };
+              handlers.onTool?.({ query: d.query, added: d.added ?? null, phase: d.phase, evidences: d.evidences, total: d.total });
               break;
             }
             case "delta": handlers.onDelta?.((data as { text: string }).text); break;

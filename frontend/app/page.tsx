@@ -10,6 +10,7 @@ interface ChatMsg {
   content: string;
   citations: Citation[];
   evidences: EvidenceInfo[];
+  tools: { query: string; added: number | null }[];
   refused?: boolean;
   streaming?: boolean;
   phase?: "searching" | "generating";
@@ -79,9 +80,9 @@ export default function ChatPage() {
     nearBottomRef.current = true;
     textRef.current = "";
     setMessages(m => [...m, {
-      role: "user", content: question, citations: [], evidences: [],
+      role: "user", content: question, citations: [], evidences: [], tools: [],
     }, {
-      role: "assistant", content: "", citations: [], evidences: [], streaming: true, phase: "searching",
+      role: "assistant", content: "", citations: [], evidences: [], tools: [], streaming: true, phase: "searching",
     }]);
     scrollBottom(true);
 
@@ -97,7 +98,26 @@ export default function ChatPage() {
       await api.chat(question, convId, docFilter.length ? docFilter : null, {
         onMeta: id => { setConvId(id); refreshLists(); },
         onEvidence: (evidences) => {
-          patch(m => ({ ...m, evidences, phase: "generating" }));
+          patch(m => ({ ...m, evidences, phase: evidences.length ? "generating" : m.phase }));
+          scrollBottom();
+        },
+        onTool: info => {
+          patch(m => {
+            if (info.phase === "start") {
+              return { ...m, phase: "generating", tools: [...m.tools, { query: info.query, added: null }] };
+            }
+            // done：回填新增数量 + 把新证据并入证据条
+            const tools = m.tools.slice();
+            for (let i = tools.length - 1; i >= 0; i--) {
+              if (tools[i].query === info.query && tools[i].added === null) {
+                tools[i] = { ...tools[i], added: info.added ?? 0 };
+                break;
+              }
+            }
+            const existing = new Set(m.evidences.map(e => e.chunk_id));
+            const merged = [...m.evidences, ...(info.evidences || []).filter(e => !existing.has(e.chunk_id))];
+            return { ...m, tools, evidences: merged };
+          });
           scrollBottom();
         },
         onDelta: text => {
@@ -162,6 +182,7 @@ export default function ChatPage() {
       content: m.content,
       citations: m.citations || [],
       evidences: [],
+      tools: [],
     })));
     nearBottomRef.current = true;
     scrollBottom(true);
@@ -241,6 +262,15 @@ export default function ChatPage() {
             {messages.map((m, i) => (
               <div key={i} className={`msg ${m.role}`}>
                 <div className="role">{m.role === "user" ? "你" : "Cortex"}</div>
+                {m.role === "assistant" && m.tools.length > 0 && (
+                  <div className="tool-strip">
+                    {m.tools.map((t, j) => (
+                      <span key={j} className={`tool-chip ${t.added === null ? "pending" : ""}`}>
+                        🔍 {t.added === null ? `检索中：${t.query}` : `补充检索「${t.query}」＋${t.added}`}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 {m.role === "assistant" && m.evidences.length > 0 && (
                   <div className="evidence-strip">
                     {m.evidences.map(ev => (

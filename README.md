@@ -18,6 +18,8 @@
 | 引用验证 | FR-CT-02 | 生成后校验：`[n]` 不在证据集内的引用直接剔除（防幻觉引用） |
 | 模型配置 | FR-SM-01 | OpenAI 兼容接口（DeepSeek/GLM/Ollama…），设置页可改、可测连 |
 | 本地优先 | FR-SM-02 | PDF/索引/对话记录全部本地（SQLite + numpy + 文件系统） |
+| Agentic 检索循环 | FR-RA-01（部分） | 证据不足时 LLM 自主调用 `search_kb` 工具改写查询补充检索（最多 3 轮，预算封顶），界面实时显示检索状态 |
+| 长期记忆 | 参考 Hermes Agent | 对话后自动沉淀研究方向/偏好（FTS5 召回 + LLM 摘要注入，可关可删），越用越懂你 |
 
 **未实现（下一版）**：Zotero 同步、rerank 精排、元数据补全（DOI/CrossRef）、综述生成 Agent、引用验证 entailment 复核、Markdown 笔记、成本面板、扫描件 OCR。
 

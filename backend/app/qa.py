@@ -1,16 +1,18 @@
-"""RAG 问答管线（FR-QA-01~04 + FR-CT-02）。
+"""RAG 问答管线（FR-QA-01~04 + FR-CT-02 + Agentic 检索循环 + 长期记忆）。
 
-PaperQA2 式解耦：检索出的证据先行组装并编号 [1..n]，
-生成阶段被强制只引用这些编号；生成后做引用验证 pass：
-- [n] 不在证据集内 → 从文本中剔除该引用（防幻觉引用）；
-- 完全没有证据 → 拒答模板（US-04）；
-- 未配置 LLM → 降级为"证据列举模式"，系统仍可用、可测。
+三段式（Hermes 式"推理→工具→记忆"在科研问答上的落地）：
+1. 记忆召回：FTS5 召回长期记忆，压缩后注入 system（明确标注不可作为文献证据引用）；
+2. Agentic 检索循环：初始检索后，模型可通过 search_kb 工具自行改写查询补充检索，
+   最多 3 轮（预算封顶）；每轮流式输出，工具调用期间的内容作为状态展示；
+3. 引用验证：最终文本中不在证据集内的 [n] 直接剔除（防幻觉引用）；
+   无 LLM 时降级为证据列举模式，无证据且模型未检索到时诚实拒答。
 
 SSE 事件流：
-  evidence  → 证据列表（含引用跳转所需全部元数据）
+  evidence  → 初始证据列表
+  tool      → 补充检索状态 {query, phase: start/done, added, evidences(新增)}
   delta     → 增量文本
   citations → 验证后的引用元数据
-  done      → 结束（含 message_id）
+  done      → 结束
   error     → 错误
 """
 from __future__ import annotations
@@ -27,6 +29,29 @@ from .retriever import Evidence, retrieve
 
 CIT_RE = re.compile(r"\[(\d{1,2})\]")
 
+MAX_TOOL_ROUNDS = 3
+
+TOOLS = [{
+    "type": "function",
+    "function": {
+        "name": "search_kb",
+        "description": (
+            "在个人文献库中补充检索证据。当已有证据不足以回答时调用："
+            "换一个更精确的关键词（论文术语、方法名、数据集名、指标名），或从不同角度检索。"
+            "不要重复已经检索过的词。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "检索查询词，中英文均可"},
+                "k": {"type": "integer", "description": "返回证据块数量，默认 5",
+                      "enum": [3, 5, 8]},
+            },
+            "required": ["query"],
+        },
+    },
+}]
+
 SYSTEM_PROMPT = """你是 Cortex，一个严谨的个人科研文献库问答助手。你的回答必须遵守以下规则：
 
 1. **只依据证据回答**：仅使用 <context> 中编号 [1]–[{max_n}] 的证据块回答问题，不使用任何库外知识。
@@ -35,6 +60,15 @@ SYSTEM_PROMPT = """你是 Cortex，一个严谨的个人科研文献库问答助
 4. **忠实原文**：引用证据时保留原意，不夸大、不脑补数字。证据中的表格数据可引用并注明来源编号。
 5. **语言**：用用户提问的语言回答；术语首次出现可附英文原文。
 6. 格式：用 Markdown；适当分点；不要输出 <context> 标签本身。"""
+
+TOOL_RULE = """
+7. **补充检索工具**：你可以调用 search_kb 工具在库中检索更多证据。仅在现有证据明显不足时使用；
+   每次换更精确的查询词；最多调用 {max_rounds} 次。最终回答仍只允许引用上文编号体系中的证据。"""
+
+MEMORY_BLOCK = """<memory>
+以下是关于用户的长期记忆（仅供个性化参考，不是文献证据，禁止为其中内容添加引用编号）：
+{memories}
+</memory>"""
 
 EVIDENCE_BLOCK = """<context>
 {blocks}
@@ -92,8 +126,8 @@ def _validate_citations(text: str, evidences: list[Evidence]) -> tuple[str, list
     return cleaned, citations
 
 
-def _history_messages(conversation_id: str, question: str) -> list[dict]:
-    """多轮：取最近 N 轮历史（含本轮提问）。"""
+def _history_messages(conversation_id: str) -> list[dict]:
+    """多轮：取最近 N 轮历史。"""
     turns = get_setting("history_turns", str(config.HISTORY_TURNS))
     try:
         n = max(0, int(turns))
@@ -110,14 +144,12 @@ def _history_messages(conversation_id: str, question: str) -> list[dict]:
     return msgs
 
 
-def build_prompt(question: str, evidences: list[Evidence],
-                 history: list[dict]) -> list[dict]:
-    ctx = EVIDENCE_BLOCK.format(blocks=_format_evidence_blocks(evidences))
-    msgs = [{"role": "system", "content": SYSTEM_PROMPT.replace("{max_n}", str(len(evidences)))}]
-    for h in history:
-        msgs.append(h)
-    msgs.append({"role": "user", "content": f"{ctx}\n\n<question>{question}</question>"})
-    return msgs
+def _system_prompt(n_evidence: int, memory_text: str | None) -> str:
+    prompt = SYSTEM_PROMPT.replace("{max_n}", str(n_evidence)) + TOOL_RULE.replace(
+        "{max_rounds}", str(MAX_TOOL_ROUNDS))
+    if memory_text:
+        prompt += "\n" + MEMORY_BLOCK.replace("{memories}", memory_text)
+    return prompt
 
 
 def evidence_only_answer(question: str, evidences: list[Evidence]) -> str:
@@ -135,43 +167,78 @@ def evidence_only_answer(question: str, evidences: list[Evidence]) -> str:
     return "\n".join(lines)
 
 
+def _memory_for(question: str) -> str | None:
+    """召回长期记忆（失败静默）。可在设置中关闭。"""
+    if get_setting("memory_enabled", "on") != "on":
+        return None
+    try:
+        from .memory import recall_condensed
+        return recall_condensed(question)
+    except Exception:
+        return None
+
+
+def _run_search_kb(args: dict, evidences: list[Evidence], seen: set[int]) -> tuple[list[Evidence], str]:
+    """执行 search_kb 工具：追加新证据（全局重编号），返回(新增证据, 给模型的文本)。"""
+    query = str(args.get("query", "")).strip()
+    try:
+        k = int(args.get("k", 5))
+    except (TypeError, ValueError):
+        k = 5
+    k = min(max(k, 1), 8)
+    if not query:
+        return [], "（查询为空，未检索）"
+    results = retrieve(query, top_k=k)
+    new = [ev for ev in results if ev.chunk_id not in seen]
+    for ev in new:
+        seen.add(ev.chunk_id)
+        evidences.append(ev)
+    if not new:
+        return [], (f"（查询「{query}」无新增证据，返回了 {len(results)} 个已有证据块。"
+                    f"请换一个角度的关键词，或基于现有证据回答。）")
+    lines = [f"补充检索「{query}」新增 {len(new)} 个证据块："]
+    for ev in new:
+        sec = " > ".join(ev.section_path) if ev.section_path else ""
+        head = f"[{ev.n}] 《{ev.title}》 p.{ev.page_start}"
+        if sec:
+            head += f" ｜ {sec}"
+        lines.append(f"{head}\n{ev.text[:2000]}")
+    return new, "\n\n".join(lines)
+
+
 def stream_answer(conversation_id: str, question: str,
                   doc_ids: list[str] | None = None) -> Generator[dict, None, None]:
-    """完整问答流。yield 的事件 dict 由路由层转成 SSE。"""
-    evidences = retrieve(question, doc_ids=doc_ids)
+    """完整问答流（含 Agentic 检索循环 + 记忆）。yield 的 dict 由路由层转成 SSE。"""
+    evidences: list[Evidence] = retrieve(question, doc_ids=doc_ids)
+    seen = {ev.chunk_id for ev in evidences}
 
-    yield {"event": "evidence", "data": {
-        "evidences": [{
+    def ev_payload(list_: list[Evidence]) -> list[dict]:
+        return [{
             "n": ev.n, "chunk_id": ev.chunk_id, "doc_id": ev.doc_id,
             "title": ev.title, "page": ev.page_start, "page_end": ev.page_end,
             "section_path": ev.section_path, "snippet": ev.snippet,
             "bboxes": ev.bboxes, "score": round(ev.score, 4),
-        } for ev in evidences],
+        } for ev in list_]
+
+    yield {"event": "evidence", "data": {
+        "evidences": ev_payload(evidences),
         "llm_ready": llm_ready(),
     }}
 
-    # 落库用户消息
     with db() as conn:
         conn.execute(
             "INSERT INTO messages(conversation_id, role, content) VALUES (?, 'user', ?)",
             (conversation_id, question),
         )
 
-    if not evidences:
-        nearest = retrieve(question, top_k=3)  # 拒答时给出最接近内容
-        near_txt = "\n".join(
-            f"- 《{ev.title}》 p.{ev.page_start}：{ev.snippet}…" for ev in nearest
-        ) or "（无）"
-        with db() as conn:
-            n_docs = conn.execute("SELECT COUNT(*) c FROM documents WHERE status='indexed'").fetchone()["c"]
-        answer = REFUSAL_TEMPLATE.format(query=question, n_docs=n_docs, nearest=near_txt)
-        yield {"event": "delta", "data": {"text": answer}}
-        _save_assistant(conversation_id, answer, [])
-        yield {"event": "citations", "data": {"citations": []}}
-        yield {"event": "done", "data": {"refused": True}}
-        return
-
     if not llm_ready():
+        if not evidences:
+            answer = "知识库当前为空或未命中相关内容。请先在「文献库」页导入 PDF。"
+            yield {"event": "delta", "data": {"text": answer}}
+            _save_assistant(conversation_id, answer, [])
+            yield {"event": "citations", "data": {"citations": []}}
+            yield {"event": "done", "data": {"refused": True}}
+            return
         answer = evidence_only_answer(question, evidences)
         yield {"event": "delta", "data": {"text": answer}}
         _, citations = _validate_citations(answer, evidences)
@@ -180,28 +247,125 @@ def stream_answer(conversation_id: str, question: str,
         yield {"event": "done", "data": {"refused": False}}
         return
 
-    history = _history_messages(conversation_id, question)
-    prompt = build_prompt(question, evidences, history)
+    # ---- Agentic 检索循环（流式，工具调用轮的内容作为状态，stop 轮为最终答案）----
+    memory_text = _memory_for(question)
+    messages: list[dict] = [
+        {"role": "system", "content": _system_prompt(len(evidences), memory_text)},
+        *_history_messages(conversation_id),
+        {"role": "user", "content":
+            EVIDENCE_BLOCK.format(blocks=_format_evidence_blocks(evidences) or "（初始检索无结果）")
+            + f"\n\n<question>{question}</question>"},
+    ]
 
-    buf = ""
-    try:
-        stream = chat(prompt, stream=True)
-        for chunk in stream:
-            delta = chunk.choices[0].delta.content if chunk.choices else None
-            if delta:
-                buf += delta
-                yield {"event": "delta", "data": {"text": delta}}
-    except Exception as e:  # 网络/Key 错误 → 降级证据模式
-        err = f"\n\n> ⚠️ LLM 调用失败（{type(e).__name__}），已降级为证据列举模式。请检查「设置」中的 API 配置。"
-        yield {"event": "delta", "data": {"text": err}}
-        if not buf:
-            buf = evidence_only_answer(question, evidences)
-            yield {"event": "delta", "data": {"text": buf}}
+    final_text = ""
+    for _ in range(MAX_TOOL_ROUNDS):
+        messages[0] = {"role": "system", "content": _system_prompt(len(evidences), memory_text)}
+        buf = ""
+        tool_calls: dict[int, dict] = {}
+        finish_reason = "stop"
+        try:
+            stream = chat(messages, stream=True, tools=TOOLS)
+            for chunk in stream:
+                if not chunk.choices:
+                    continue
+                choice = chunk.choices[0]
+                delta = choice.delta
+                if delta and delta.content:
+                    buf += delta.content
+                    yield {"event": "delta", "data": {"text": delta.content}}
+                if delta and getattr(delta, "tool_calls", None):
+                    for tc in delta.tool_calls:
+                        slot = tool_calls.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
+                        if tc.id:
+                            slot["id"] = tc.id
+                        if tc.function and tc.function.name:
+                            slot["name"] = tc.function.name
+                        if tc.function and tc.function.arguments:
+                            slot["arguments"] += tc.function.arguments
+                if choice.finish_reason:
+                    finish_reason = choice.finish_reason
+        except Exception as e:
+            # 网络/Key/不支持 tools → 降级为证据模式
+            err = f"\n\n> ⚠️ LLM 调用失败（{type(e).__name__}），已降级为证据列举模式。请检查「设置」中的 API 配置。"
+            yield {"event": "delta", "data": {"text": err}}
+            final_text = final_text or evidence_only_answer(question, evidences)
+            yield {"event": "delta", "data": {"text": final_text}}
+            break
 
-    cleaned, citations = _validate_citations(buf, evidences)
+        if finish_reason == "tool_calls" and tool_calls:
+            # 工具轮：执行检索后进入下一轮（已流出的前置文本保留为过程说明）
+            messages.append({"role": "assistant", "content": buf or None, "tool_calls": [
+                {"id": tc["id"], "type": "function",
+                 "function": {"name": tc["name"], "arguments": tc["arguments"] or "{}"}}
+                for tc in tool_calls.values() if tc["name"]
+            ]})
+            for tc in tool_calls.values():
+                if tc["name"] != "search_kb":
+                    messages.append({"role": "tool", "tool_call_id": tc["id"] or "t0",
+                                     "content": "（未知工具）"})
+                    continue
+                try:
+                    args = json.loads(tc["arguments"] or "{}")
+                except json.JSONDecodeError:
+                    args = {}
+                query = str(args.get("query", ""))
+                yield {"event": "tool", "data": {"phase": "start", "query": query}}
+                new, result_text = _run_search_kb(args, evidences, seen)
+                yield {"event": "tool", "data": {
+                    "phase": "done", "query": query, "added": len(new),
+                    "total": len(evidences), "evidences": ev_payload(new),
+                }}
+                messages.append({"role": "tool", "tool_call_id": tc["id"] or "t0",
+                                 "content": result_text})
+            continue
+
+        # stop：最终答案
+        final_text = buf
+        break
+
+    if not final_text:
+        # 预算耗尽时模型仍在请求工具 → 强制做一次无工具的最终生成
+        messages[0] = {"role": "system", "content": _system_prompt(len(evidences), memory_text)}
+        messages.append({"role": "user", "content":
+            "（检索预算已用完）请立即基于现有证据回答上述问题；"
+            "若证据确实不足，请明确说明库中未找到足够证据。"})
+        buf = ""
+        try:
+            stream = chat(messages, stream=True)
+            for chunk in stream:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                if delta and delta.content:
+                    buf += delta.content
+                    yield {"event": "delta", "data": {"text": delta.content}}
+        except Exception:
+            pass
+        final_text = buf
+
+    if not evidences:
+        with db() as conn:
+            n_docs = conn.execute(
+                "SELECT COUNT(*) c FROM documents WHERE status='indexed'").fetchone()["c"]
+        nearest = retrieve(question, top_k=3)
+        near_txt = "\n".join(
+            f"- 《{ev.title}》 p.{ev.page_start}：{ev.snippet}…" for ev in nearest) or "（无）"
+        answer = REFUSAL_TEMPLATE.format(query=question, n_docs=n_docs, nearest=near_txt)
+        yield {"event": "delta", "data": {"text": answer}}
+        _save_assistant(conversation_id, answer, [])
+        yield {"event": "citations", "data": {"citations": []}}
+        yield {"event": "done", "data": {"refused": True}}
+        return
+
+    cleaned, citations = _validate_citations(final_text, evidences)
     _save_assistant(conversation_id, cleaned, citations)
     yield {"event": "citations", "data": {"citations": citations}}
     yield {"event": "done", "data": {"refused": False}}
+
+    # 会话后沉淀记忆（后台线程，不阻塞）
+    if cleaned and not cleaned.startswith("**库中未找到"):
+        from .memory import extract_async
+        extract_async(conversation_id, question, cleaned)
 
 
 def _save_assistant(conversation_id: str, content: str, citations: list[dict]):

@@ -32,8 +32,12 @@ def llm_ready() -> bool:
     return bool(cfg.api_key and cfg.model)
 
 
-def chat(messages: list[dict], stream: bool = False, temperature: float = 0.2):
-    """返回 OpenAI 客户端的 chat.completions 结果（stream 或完整）。"""
+def chat(messages: list[dict], stream: bool = False, temperature: float = 0.2,
+         tools: list[dict] | None = None):
+    """返回 OpenAI 客户端的 chat.completions 结果（stream 或完整）。
+
+    tools 非 None 时启用 function calling（Agentic 检索循环用）。
+    """
     import re
     from openai import OpenAI
     cfg = get_llm_config()
@@ -43,12 +47,15 @@ def chat(messages: list[dict], stream: bool = False, temperature: float = 0.2):
         base = f"{base}/v1"
     client = OpenAI(base_url=base, api_key=cfg.api_key or "EMPTY",
                     timeout=120, max_retries=1)
-    return client.chat.completions.create(
+    kwargs = dict(
         model=cfg.model,
         messages=messages,
         stream=stream,
         temperature=temperature,
     )
+    if tools:
+        kwargs["tools"] = tools
+    return client.chat.completions.create(**kwargs)
 
 
 def chat_text(messages: list[dict], temperature: float = 0.2) -> str:

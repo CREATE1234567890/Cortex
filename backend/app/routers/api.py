@@ -156,6 +156,39 @@ def chat_sse(req: ChatReq):
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+# ---------- 长期记忆 ----------
+
+@router.get("/memories")
+def memories_list():
+    from ..memory import list_memories
+    return {"enabled": get_setting("memory_enabled", "on") == "on",
+            "items": list_memories()}
+
+
+@router.delete("/memories/{mem_id}")
+def memories_delete(mem_id: int):
+    from ..memory import delete_memory
+    delete_memory(mem_id)
+    return {"ok": True}
+
+
+@router.post("/memories/clear")
+def memories_clear():
+    from ..memory import clear_memories
+    clear_memories()
+    return {"ok": True}
+
+
+class MemoryToggleReq(BaseModel):
+    enabled: bool
+
+
+@router.post("/memories/toggle")
+def memories_toggle(req: MemoryToggleReq):
+    set_setting("memory_enabled", "on" if req.enabled else "off")
+    return {"enabled": req.enabled}
+
+
 # ---------- 设置 ----------
 
 class SettingsReq(BaseModel):
