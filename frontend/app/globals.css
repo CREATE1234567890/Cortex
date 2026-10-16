@@ -120,7 +120,55 @@ input:focus, textarea:focus { border-color: var(--accent); }
 .page { height: calc(100% - 52px); display: flex; flex-direction: column; }
 
 /* ---------- 聊天 ---------- */
-.chat-layout { display: flex; flex: 1; min-height: 0; }
+.chat-layout { display: flex; flex: 1; min-height: 0; position: relative; }
+
+.conv-sidebar {
+  width: 230px;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex-shrink: 0;
+}
+.conv-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-2);
+  margin-bottom: 2px;
+}
+.conv-item:hover { background: #f0f2f5; }
+.conv-item.active { background: var(--accent-soft); color: var(--accent-deep); }
+.conv-item .conv-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.conv-item .conv-time {
+  font-size: 10.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.conv-item .conv-del {
+  border: none;
+  background: transparent;
+  padding: 2px 5px;
+  font-size: 11px;
+  color: var(--text-3);
+  border-radius: 5px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.conv-item:hover .conv-del { opacity: 1; }
+.conv-item .conv-del:hover { color: var(--red); background: var(--red-soft); }
+
 .chat-main {
   flex: 1.2;
   min-width: 420px;
@@ -156,6 +204,26 @@ input:focus, textarea:focus { border-color: var(--accent); }
 }
 .chat-input-box textarea:focus { border: none; }
 .chat-input-box button { align-self: flex-end; height: 36px; }
+.send-btn { white-space: nowrap; min-width: 76px; }
+
+/* 原文面板收起后的重开按钮 */
+.pdf-reopen {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  writing-mode: vertical-rl;
+  padding: 14px 6px;
+  border-radius: 10px 0 0 10px;
+  border-right: none;
+  background: var(--panel);
+  box-shadow: -2px 0 8px rgba(16, 24, 40, 0.08);
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: var(--text-2);
+  z-index: 10;
+}
+.pdf-reopen:hover { color: var(--accent-deep); background: var(--accent-soft); }
 
 .msg { margin-bottom: 22px; }
 .msg .role {

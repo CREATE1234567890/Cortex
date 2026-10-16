@@ -18,7 +18,7 @@ export interface PdfTarget {
  * - 高亮在页面渲染完成后用同一 viewport 变换同步绘制（bbox 为 PDF 点坐标）；
  * - 加载前确保 rAF 可用（嵌入式浏览器降级，见 lib/raf.ts）。
  */
-export default function PdfViewer({ target }: { target: PdfTarget | null }) {
+export default function PdfViewer({ target, onClose }: { target: PdfTarget | null; onClose?: () => void }) {
   const holderRef = useRef<HTMLDivElement>(null);
   const [pdfDoc, setPdfDoc] = useState<any>(null);
   const [numPages, setNumPages] = useState(0);
@@ -110,9 +110,18 @@ export default function PdfViewer({ target }: { target: PdfTarget | null }) {
     setCurPage(Math.max(1, Math.min(numPages, p)));
   };
 
+  // 键盘翻页：←/→ 或 PageUp/PageDown（面板获得焦点时生效）
+  const onPanelKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowLeft" || e.key === "PageUp") { e.preventDefault(); goPage(curPage - 1); }
+    else if (e.key === "ArrowRight" || e.key === "PageDown") { e.preventDefault(); goPage(curPage + 1); }
+  };
+
   if (!target) {
     return (
-      <div className="pdf-panel">
+      <div className="pdf-panel" tabIndex={0} onKeyDown={onPanelKeyDown}>
+        <div className="pdf-toolbar" style={{ justifyContent: "flex-end" }}>
+          {onClose && <button className="small" onClick={onClose} title="收起原文面板">✕</button>}
+        </div>
         <div className="pdf-empty">
           <div style={{ fontSize: 34 }}>📄</div>
           <div>点击回答中的引用角标<br />这里会打开原文对应页并高亮证据区域</div>
@@ -122,7 +131,7 @@ export default function PdfViewer({ target }: { target: PdfTarget | null }) {
   }
 
   return (
-    <div className="pdf-panel">
+    <div className="pdf-panel" tabIndex={0} onKeyDown={onPanelKeyDown}>
       <div className="pdf-toolbar">
         <span className="doc-title" title={target.title}>《{target.title}》</span>
         <button className="small" onClick={() => goPage(curPage - 1)} disabled={curPage <= 1}>‹</button>
@@ -132,6 +141,7 @@ export default function PdfViewer({ target }: { target: PdfTarget | null }) {
         <button className="small" onClick={() => setScale(s => Math.max(0.6, s - 0.25))}>－</button>
         <span>{Math.round(scale * 100)}%</span>
         <button className="small" onClick={() => setScale(s => Math.min(3, s + 0.25))}>＋</button>
+        {onClose && <button className="small" onClick={onClose} title="收起原文面板">✕</button>}
       </div>
       <div className="pdf-scroll">
         {err && <div style={{ color: "#ffb4b0", padding: 20 }}>{err}</div>}

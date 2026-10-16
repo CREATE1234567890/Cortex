@@ -74,6 +74,7 @@ function splitBlocks(md: string): Chunk[] {
 
 const INLINE_RE = /(\*\*[^*]+\*\*|\*[^*\n]+\*|`[^`]+`|\[\d{1,2}\])/g;
 
+/** 递归渲染行内元素：加粗/斜体内部的 [n] 引用同样转为可点击角标 */
 function renderInline(
   text: string,
   citations: Map<number, Citation>,
@@ -83,8 +84,12 @@ function renderInline(
   const parts = text.split(INLINE_RE).filter(s => s !== "");
   return parts.map((part, idx) => {
     const key = `${keyPrefix}-${idx}`;
-    if (/^\*\*[^*]+\*\*$/.test(part)) return <strong key={key}>{part.slice(2, -2)}</strong>;
-    if (/^\*[^*]+\*$/.test(part)) return <em key={key}>{part.slice(1, -1)}</em>;
+    if (/^\*\*([^*]+)\*\*$/.test(part)) {
+      return <strong key={key}>{renderInline(part.slice(2, -2), citations, onCite, key + "b")}</strong>;
+    }
+    if (/^\*([^*]+)\*$/.test(part)) {
+      return <em key={key}>{renderInline(part.slice(1, -1), citations, onCite, key + "i")}</em>;
+    }
     if (/^`[^`]+`$/.test(part)) return <code key={key}>{part.slice(1, -1)}</code>;
     const m = part.match(/^\[(\d{1,2})\]$/);
     if (m) {
@@ -94,7 +99,7 @@ function renderInline(
         <span
           key={key}
           className="cite"
-          title={cit ? `《${cit.title}》 p.${cit.page}` : `[${n}]`}
+          title={cit ? `《${cit.title}》 p.${cit.page}${cit.section_path?.length ? " ｜ " + cit.section_path.join(" > ") : ""}` : `[${n}]`}
           onClick={e => { e.stopPropagation(); if (cit) onCite(cit); }}
         >
           {n}

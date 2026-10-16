@@ -63,14 +63,22 @@ export default function LibraryPage() {
     } catch (e) { toast(`导入失败：${e}`); }
   }
 
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+
   async function retry(id: string) {
-    await api.retryDocument(id);
-    toast("已重新解析");
+    setRetryingId(id);
+    try {
+      await api.retryDocument(id);
+      toast("已重新解析");
+    } catch { toast("重试失败，请稍后再试"); }
+    finally { setRetryingId(null); }
     refresh();
   }
 
-  async function remove(id: string) {
+  async function remove(id: string, filename: string) {
+    if (!window.confirm(`确定从知识库删除《${filename}》吗？\n（只删除索引，不会删除磁盘上的 PDF 文件）`)) return;
     await api.deleteDocument(id);
+    toast("已删除");
     refresh();
   }
 
@@ -158,7 +166,14 @@ export default function LibraryPage() {
         </div>
 
         <div className="card">
-          <h3>已导入文档（{docs.length}）</h3>
+          <h3>
+            已导入文档（{docs.length}）
+            {docs.some(d => d.status === "failed") && (
+              <span style={{ fontSize: 12, color: "var(--red)", fontWeight: 400, marginLeft: 10 }}>
+                {docs.filter(d => d.status === "failed").length} 篇失败，可重试
+              </span>
+            )}
+          </h3>
           {docs.length === 0 ? (
             <div className="empty-state" style={{ padding: "30px 0" }}>
               <div>还没有文档。扫描文件夹并导入即可开始提问。</div>
@@ -185,8 +200,12 @@ export default function LibraryPage() {
                     <td style={{ whiteSpace: "nowrap", color: "var(--text-2)" }}>{(d.indexed_at || d.created_at || "").slice(0, 16)}</td>
                     <td>
                       <div className="row" style={{ gap: 6 }}>
-                        {d.status === "failed" && <button className="small" onClick={() => retry(d.id)}>重试</button>}
-                        <button className="small danger" onClick={() => remove(d.id)}>删除</button>
+                        {d.status === "failed" && (
+                          <button className="small" onClick={() => retry(d.id)} disabled={retryingId !== null}>
+                            {retryingId === d.id ? <span className="spin" /> : "重试"}
+                          </button>
+                        )}
+                        <button className="small danger" onClick={() => remove(d.id, d.title || d.filename)}>删除</button>
                       </div>
                     </td>
                   </tr>

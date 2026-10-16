@@ -167,6 +167,23 @@ def get_job() -> dict:
         return row_to_dict(row)
 
 
+def _valid_title(title: str | None, fallback: str) -> str:
+    """清洗解析出的标题：控制字符/公式占位/乱码/过短时退回文件名。"""
+    import re as _re
+    t = _re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", (title or "")).strip()
+    t = _re.sub(r"\s+", " ", t)
+    bad = (
+        not t
+        or "formula omitted" in t.lower()
+        or "\ufffd" in t
+        or len(t) < 8
+    )
+    if bad:
+        stem = _re.sub(r"\s+", " ", Path(fallback).stem.replace("_", " ").strip())
+        return stem[:200] if stem else (t or "未命名文献")
+    return t[:200]
+
+
 def process_document(doc_id: str) -> bool:
     """单个文档：子进程解析/切块/嵌入 → 主进程落库/建索引。返回是否成功。"""
     import json as _json
@@ -213,7 +230,8 @@ def process_document(doc_id: str) -> bool:
             conn.execute(
                 "UPDATE documents SET status='indexed', n_pages=?, n_chunks=?, error=NULL, "
                 "indexed_at=datetime('now'), title=?, year=? WHERE id=?",
-                (payload["n_pages"], len(chunks), payload["title"] or doc["title"],
+                (payload["n_pages"], len(chunks),
+                 _valid_title(payload["title"], doc["filename"]),
                  payload["year"], doc_id),
             )
         index.append(new_ids, vectors)
