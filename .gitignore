@@ -1,0 +1,6 @@
+backend/data/
+frontend/node_modules/
+frontend/.next/
+frontend/public/pdf.worker.min.mjs
+__pycache__/
+*.pyc
