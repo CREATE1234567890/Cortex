@@ -186,6 +186,7 @@ input:focus, textarea:focus { border-color: var(--accent); }
   background: linear-gradient(transparent, var(--bg) 40%);
 }
 .chat-input-box {
+  position: relative;
   display: flex;
   gap: 10px;
   background: var(--panel);
@@ -328,6 +329,180 @@ input:focus, textarea:focus { border-color: var(--accent); }
   user-select: none;
 }
 .cite:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* 检索过程折叠块（ZCode/Claude 式） */
+.process-block {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fafbfc;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+.process-block.running { border-color: #c9dbff; background: #fbfdff; }
+.process-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  cursor: pointer;
+  text-align: left;
+}
+.process-head:hover { background: #f0f2f5; }
+.process-head .chev {
+  display: inline-block;
+  transition: transform 0.15s;
+  color: var(--text-3);
+}
+.process-head .chev.open { transform: rotate(90deg); }
+.process-title { font-weight: 500; }
+.process-body { padding: 2px 12px 10px; }
+.process-line {
+  font-size: 12.5px;
+  color: var(--text-2);
+  padding: 3px 0;
+}
+.process-line b { color: var(--green); }
+
+/* 消息悬浮操作栏 */
+.msg-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.msg:hover .msg-actions { opacity: 1; }
+.action-btn {
+  font-size: 12px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text-2);
+}
+.action-btn:hover:not(:disabled) { color: var(--accent-deep); border-color: var(--accent); background: var(--accent-soft); }
+.cite-verified {
+  font-size: 12px;
+  color: var(--green);
+  background: var(--green-soft);
+  border-radius: 6px;
+  padding: 3px 9px;
+}
+.stopped-note {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-3);
+  font-style: italic;
+}
+
+/* @ 提及文献选择器 */
+.mention-dropdown {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 10px;
+  right: 10px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.14);
+  z-index: 30;
+}
+.mention-head {
+  font-size: 11.5px;
+  color: var(--text-3);
+  padding: 7px 12px 4px;
+}
+.mention-item {
+  padding: 7px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.mention-item.hl, .mention-item:hover { background: var(--accent-soft); color: var(--accent-deep); }
+
+/* 限定范围标签 */
+.scope-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px 8px;
+}
+.scope-hint { font-size: 12px; color: var(--text-3); }
+.scope-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  border: 1px solid #c9dbff;
+  border-radius: 8px;
+  padding: 3px 8px;
+  max-width: 320px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.scope-chip button {
+  border: none;
+  background: transparent;
+  color: inherit;
+  padding: 0 2px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.scope-chip button:hover { color: var(--red); }
+.scope-clear {
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  color: var(--text-3);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.scope-clear:hover { color: var(--red); }
+
+/* 停止按钮 */
+.stop-btn {
+  align-self: flex-end;
+  height: 36px;
+  white-space: nowrap;
+  color: var(--red);
+  border-color: #efc4c1;
+  background: var(--red-soft);
+}
+.stop-btn:hover { background: #fadcd9; }
+
+.kbd {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  background: #eef0f3;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 0 5px;
+}
+
+/* 会话分组 */
+.conv-group-label {
+  font-size: 11px;
+  color: var(--text-3);
+  font-weight: 600;
+  padding: 10px 8px 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
 
 /* 证据列表 */
 .evidence-strip {

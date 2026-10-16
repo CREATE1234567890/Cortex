@@ -132,7 +132,7 @@ export const api = {
       body: JSON.stringify({ enabled }),
     }),
 
-  /** SSE 流式问答；onEvent 按 event 类型回调 */
+  /** SSE 流式问答；onEvent 按 event 类型回调；signal 用于停止生成 */
   chat(
     question: string,
     conversationId: string | null,
@@ -146,11 +146,13 @@ export const api = {
       onDone?: (info: { refused: boolean }) => void;
       onError?: (message: string) => void;
     },
+    signal?: AbortSignal,
   ): Promise<void> {
     return fetch(`${API}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question, conversation_id: conversationId, doc_ids: docIds }),
+      signal,
     }).then(async (res) => {
       if (!res.ok || !res.body) {
         const text = await res.text().catch(() => res.statusText);
