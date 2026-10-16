@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, Citation } from "@/lib/api";
 import { ensureRafWorks } from "@/lib/raf";
+import { useLang } from "@/components/Lang";
 
 export interface PdfTarget {
   docId: string;
@@ -19,6 +20,7 @@ export interface PdfTarget {
  * - 加载前确保 rAF 可用（嵌入式浏览器降级，见 lib/raf.ts）。
  */
 export default function PdfViewer({ target }: { target: PdfTarget | null }) {
+  const { t } = useLang();
   const holderRef = useRef<HTMLDivElement>(null);
   const [pdfDoc, setPdfDoc] = useState<any>(null);
   const [numPages, setNumPages] = useState(0);
@@ -47,7 +49,7 @@ export default function PdfViewer({ target }: { target: PdfTarget | null }) {
         setPdfDoc(doc);
         setNumPages(doc.numPages);
       } catch (e) {
-        if (!cancelled) setErr(`PDF 加载失败：${e}`);
+        if (!cancelled) setErr(t("pdf_load_fail", { e: String(e) }));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -99,7 +101,7 @@ export default function PdfViewer({ target }: { target: PdfTarget | null }) {
         holder.appendChild(div);
       }
     } catch (e) {
-      if (seq === renderSeq.current) setErr(`页面渲染失败：${e}`);
+      if (seq === renderSeq.current) setErr(t("pdf_render_fail", { e: String(e) }));
     }
   }, [pdfDoc, scale]);
 
@@ -121,7 +123,7 @@ export default function PdfViewer({ target }: { target: PdfTarget | null }) {
       <div className="pdf-panel" tabIndex={0} onKeyDown={onPanelKeyDown}>
         <div className="pdf-empty">
           <div style={{ fontSize: 34 }}>📄</div>
-          <div>点击回答中的引用角标<br />这里会打开原文对应页并高亮证据区域</div>
+          <div>{t("pdf_empty_tip").split("\n").map((l, i) => <span key={i}>{l}{i === 0 && <br />}</span>)}</div>
         </div>
       </div>
     );
@@ -132,7 +134,7 @@ export default function PdfViewer({ target }: { target: PdfTarget | null }) {
       <div className="pdf-toolbar">
         <span className="doc-title" title={target.title}>《{target.title}》</span>
         <button className="small" onClick={() => goPage(curPage - 1)} disabled={curPage <= 1}>‹</button>
-        <span>第 {curPage} / {numPages} 页</span>
+        <span>{t("pdf_page", { p: curPage, n: numPages })}</span>
         <button className="small" onClick={() => goPage(curPage + 1)} disabled={curPage >= numPages}>›</button>
         <span style={{ flex: 1 }} />
         <button className="small" onClick={() => setScale(s => Math.max(0.6, s - 0.25))}>－</button>
@@ -141,7 +143,7 @@ export default function PdfViewer({ target }: { target: PdfTarget | null }) {
       </div>
       <div className="pdf-scroll">
         {err && <div style={{ color: "#ffb4b0", padding: 20 }}>{err}</div>}
-        {loading && <div style={{ padding: 30, color: "#ddd" }}><span className="spin" /> 正在打开 PDF…</div>}
+        {loading && <div style={{ padding: 30, color: "#ddd" }}><span className="spin" /> {t("pdf_loading")}</div>}
         <div className="pdf-page-wrap" ref={holderRef} />
       </div>
     </div>

@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, DocumentInfo, IngestJob } from "@/lib/api";
+import { useLang } from "@/components/Lang";
 
 export default function LibraryPage() {
+  const { t } = useLang();
   const [docs, setDocs] = useState<DocumentInfo[]>([]);
   const [job, setJob] = useState<IngestJob | null>(null);
   const [root, setRoot] = useState("");
@@ -46,21 +48,21 @@ export default function LibraryPage() {
       const res = await api.scan(root);
       setScanned(res.files);
       setSelected(new Set(res.files.filter(f => !f.known).map(f => f.path)));
-      toast(`扫描到 ${res.total} 个 PDF`);
+      toast(t("lib_scan_ok", { n: res.total }));
     } catch (e) {
-      toast(`扫描失败：${e}`);
+      toast(t("lib_scan_fail", { e: String(e) }));
     } finally { setScanning(false); }
   }
 
   async function ingestSelected(incremental: boolean) {
     const paths = [...selected];
-    if (!paths.length) { toast("未选择任何文件"); return; }
+    if (!paths.length) { toast(t("lib_no_sel")); return; }
     try {
       const res = await api.ingest(paths, incremental);
-      if (res.started) toast(`已开始导入 ${res.queued} 个文件`);
-      else toast(res.reason || "未能开始");
+      if (res.started) toast(t("lib_started", { n: res.queued ?? 0 }));
+      else toast(res.reason || t("lib_start_fail"));
       refresh();
-    } catch (e) { toast(`导入失败：${e}`); }
+    } catch (e) { toast(t("lib_ing_fail", { e: String(e) })); }
   }
 
   const [retryingId, setRetryingId] = useState<string | null>(null);
@@ -69,16 +71,16 @@ export default function LibraryPage() {
     setRetryingId(id);
     try {
       await api.retryDocument(id);
-      toast("已重新解析");
-    } catch { toast("重试失败，请稍后再试"); }
+      toast(t("lib_retry_done"));
+    } catch { toast(t("lib_retry_fail")); }
     finally { setRetryingId(null); }
     refresh();
   }
 
   async function remove(id: string, filename: string) {
-    if (!window.confirm(`确定从知识库删除《${filename}》吗？\n（只删除索引，不会删除磁盘上的 PDF 文件）`)) return;
+    if (!window.confirm(t("lib_del_confirm", { name: filename }))) return;
     await api.deleteDocument(id);
-    toast("已删除");
+    toast(t("lib_deleted"));
     refresh();
   }
 
@@ -88,55 +90,55 @@ export default function LibraryPage() {
   return (
     <div className="page">
       <div className="content-page">
-        <h2>文献库</h2>
-        <p className="sub">扫描论文文件夹并导入。导入 = 解析 → 切块 → 嵌入 → 索引，全部本地完成。</p>
+        <h2>{t("lib_title")}</h2>
+        <p className="sub">{t("lib_sub")}</p>
 
         {running && job && (
           <div className="card">
-            <h3>正在导入 <span className="spin" /></h3>
+            <h3>{t("lib_importing")} <span className="spin" /></h3>
             <div className="row" style={{ marginBottom: 8 }}>
               <span className="grow">{job.current_file || "…"}</span>
               <span style={{ color: "var(--text-2)" }}>{job.done + job.failed} / {job.total}</span>
-              <button className="small danger" onClick={() => api.cancelJob().then(() => toast("已请求取消"))}>取消</button>
+              <button className="small danger" onClick={() => api.cancelJob().then(() => toast(t("lib_cancel_req")))}>{t("lib_cancel")}</button>
             </div>
             <div className="progress-bar">
               <div style={{ width: `${job.total ? ((job.done + job.failed) / job.total) * 100 : 0}%` }} />
             </div>
-            {job.failed > 0 && <div style={{ color: "var(--red)", fontSize: 12, marginTop: 6 }}>{job.failed} 个失败</div>}
+            {job.failed > 0 && <div style={{ color: "var(--red)", fontSize: 12, marginTop: 6 }}>{t("lib_n_failed", { n: job.failed })}</div>}
           </div>
         )}
 
         <div className="card">
-          <h3>扫描文件夹</h3>
+          <h3>{t("lib_scan_card")}</h3>
           <div className="row">
             <input
               type="text" className="grow" value={root}
               onChange={e => setRoot(e.target.value)}
-              placeholder="知识库根目录，例如 C:\Users\you\Desktop\论文"
+              placeholder={t("lib_scan_ph")}
             />
             <button onClick={scan} disabled={scanning || !root}>
-              {scanning ? <span className="spin" /> : "扫描"}
+              {scanning ? <span className="spin" /> : t("lib_scan_btn")}
             </button>
           </div>
           {scanned && (
             <>
               <div className="row wrap" style={{ marginTop: 12 }}>
                 <span style={{ fontSize: 13, color: "var(--text-2)" }}>
-                  共 {scanned.length} 个 PDF，已选 {selected.size} 个
+                  {t("lib_found", { n: scanned.length, m: selected.size })}
                 </span>
                 <input
-                  type="text" placeholder="按文件名过滤…" value={filter}
+                  type="text" placeholder={t("lib_filter_ph")} value={filter}
                   onChange={e => setFilter(e.target.value)} style={{ width: 200 }}
                 />
                 <span style={{ flex: 1 }} />
-                <button onClick={() => setSelected(new Set(filtered!.map(f => f.path)))}>全选</button>
-                <button onClick={() => setSelected(new Set())}>清空</button>
-                <button className="primary" onClick={() => ingestSelected(true)}>导入所选</button>
+                <button onClick={() => setSelected(new Set(filtered!.map(f => f.path)))}>{t("lib_select_all")}</button>
+                <button onClick={() => setSelected(new Set())}>{t("lib_clear_sel")}</button>
+                <button className="primary" onClick={() => ingestSelected(true)}>{t("lib_import")}</button>
               </div>
               <div style={{ maxHeight: 300, overflowY: "auto", marginTop: 10, border: "1px solid var(--border)", borderRadius: 8 }}>
                 <table className="tbl">
                   <thead>
-                    <tr><th style={{ width: 34 }}></th><th>文件</th><th>大小</th><th>状态</th></tr>
+                    <tr><th style={{ width: 34 }}></th><th>{t("lib_col_file")}</th><th>{t("lib_col_size")}</th><th>{t("lib_col_status")}</th></tr>
                   </thead>
                   <tbody>
                     {filtered!.map(f => (
@@ -155,7 +157,7 @@ export default function LibraryPage() {
                           {f.filename}
                         </td>
                         <td style={{ whiteSpace: "nowrap" }}>{f.size_mb} MB</td>
-                        <td>{f.known && <span className="badge indexed">库中已有</span>}</td>
+                        <td>{f.known && <span className="badge indexed">{t("lib_known")}</span>}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -167,22 +169,22 @@ export default function LibraryPage() {
 
         <div className="card">
           <h3>
-            已导入文档（{docs.length}）
+            {t("lib_docs", { n: docs.length })}
             {docs.some(d => d.status === "failed") && (
               <span style={{ fontSize: 12, color: "var(--red)", fontWeight: 400, marginLeft: 10 }}>
-                {docs.filter(d => d.status === "failed").length} 篇失败，可重试
+                {t("lib_failed_hint", { n: docs.filter(d => d.status === "failed").length })}
               </span>
             )}
           </h3>
           {docs.length === 0 ? (
             <div className="empty-state" style={{ padding: "30px 0" }}>
-              <div>还没有文档。扫描文件夹并导入即可开始提问。</div>
+              <div>{t("lib_none")}</div>
             </div>
           ) : (
             <table className="tbl">
               <thead>
                 <tr>
-                  <th>标题</th><th>状态</th><th>页数</th><th>块数</th><th>导入时间</th><th style={{ width: 130 }}></th>
+                  <th>{t("lib_col_title")}</th><th>{t("lib_col_status")}</th><th>{t("lib_col_pages")}</th><th>{t("lib_col_chunks")}</th><th>{t("lib_col_time")}</th><th style={{ width: 130 }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -194,7 +196,7 @@ export default function LibraryPage() {
                         {d.filename}{d.error ? ` — ${d.error}` : ""}
                       </div>
                     </td>
-                    <td><span className={`badge ${d.status}`}>{d.status}</span></td>
+                    <td><span className={`badge ${d.status}`}>{t(`status_${d.status}`)}</span></td>
                     <td>{d.n_pages || "—"}</td>
                     <td>{d.n_chunks || "—"}</td>
                     <td style={{ whiteSpace: "nowrap", color: "var(--text-2)" }}>{(d.indexed_at || d.created_at || "").slice(0, 16)}</td>
@@ -202,10 +204,10 @@ export default function LibraryPage() {
                       <div className="row" style={{ gap: 6 }}>
                         {d.status === "failed" && (
                           <button className="small" onClick={() => retry(d.id)} disabled={retryingId !== null}>
-                            {retryingId === d.id ? <span className="spin" /> : "重试"}
+                            {retryingId === d.id ? <span className="spin" /> : t("lib_retry")}
                           </button>
                         )}
-                        <button className="small danger" onClick={() => remove(d.id, d.title || d.filename)}>删除</button>
+                        <button className="small danger" onClick={() => remove(d.id, d.title || d.filename)}>{t("lib_delete")}</button>
                       </div>
                     </td>
                   </tr>

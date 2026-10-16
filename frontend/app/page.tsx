@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, Citation, ConversationInfo, EvidenceInfo, ToolInfo } from "@/lib/api";
+import { useLang } from "@/components/Lang";
 import Markdown from "@/components/Markdown";
 import PdfViewer, { PdfTarget } from "@/components/PdfViewer";
 
@@ -17,22 +18,18 @@ interface ChatMsg {
   stopped?: boolean;
 }
 
-const SUGGESTIONS = [
-  "Swin-Unet 的编码器是怎么设计的？",
-  "U2-Net 用于什么任务，效果如何？",
-  "库里的论文用了哪些医学图像分割数据集？",
-  "VMamba 相比 ViT 的优势是什么？",
-];
-
 /** 可折叠检索过程块：流式期间自动展开，完成后默认折叠（ZCode/Claude 式） */
 function ProcessBlock({ m, onOpenEvidence }: { m: ChatMsg; onOpenEvidence: (ev: EvidenceInfo) => void }) {
+  const { t } = useLang();
   const [override, setOverride] = useState<boolean | null>(null);
   const open = override ?? (m.streaming ? true : false);
   const running = m.streaming && (!m.content || !!m.phase);
   const toolCount = m.tools.length;
-  const title = m.streaming
-    ? (m.phase === "searching" ? "正在检索文献库…" : `检索中 · ${m.evidences.length} 块证据${toolCount ? ` · ${toolCount} 次补充检索` : ""}`)
-    : `检索过程 · ${m.evidences.length} 块证据${toolCount ? ` · ${toolCount} 次补充检索` : ""}`;
+  const title = m.phase === "searching" && m.streaming
+    ? t("chat_searching")
+    : m.streaming
+      ? (toolCount ? t("chat_generating_tools", { n: m.evidences.length, m: toolCount }) : t("chat_generating", { n: m.evidences.length }))
+      : (toolCount ? t("chat_process_done_tools", { n: m.evidences.length, m: toolCount }) : t("chat_process_done", { n: m.evidences.length }));
 
   if (!m.streaming && !m.evidences.length && !toolCount) return null;
 
@@ -47,10 +44,11 @@ function ProcessBlock({ m, onOpenEvidence }: { m: ChatMsg; onOpenEvidence: (ev: 
       </button>
       {open && (
         <div className="process-body">
-          {m.tools.map((t, j) => (
+          {m.tools.map((x, j) => (
             <div key={j} className="process-line">
-              {t.added === null ? "⏳" : "🔍"} 补充检索「{t.query}」
-              {t.added !== null && <b> ＋{t.added} 块</b>}
+              {x.added === null
+                ? t("chat_tool_pending", { q: x.query })
+                : t("chat_tool_done", { q: x.query }) + t("chat_tool_added", { n: x.added })}
             </div>
           ))}
           {m.evidences.length > 0 && (
@@ -76,6 +74,7 @@ function EvChip({ ev, onOpen }: { ev: EvidenceInfo; onOpen: (ev: EvidenceInfo) =
 }
 
 export default function ChatPage() {
+  const { t, lang } = useLang();
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -96,6 +95,8 @@ export default function ChatPage() {
   const textRef = useRef("");
   const flushTimer = useRef<number | null>(null);
   const lastQuestionRef = useRef("");
+
+  const suggestions = [t("sugg_1"), t("sugg_2"), t("sugg_3"), t("sugg_4")];
 
   const refreshLists = useCallback(() => {
     api.conversations().then(setConversations).catch(() => {});
@@ -247,7 +248,7 @@ export default function ChatPage() {
     } catch (e) {
       flushNow();
       if ((e as Error).name === "AbortError") {
-        patch(m => ({ ...m, stopped: true, streaming: false, content: m.content || "（已停止）" }));
+        patch(m => ({ ...m, stopped: true, streaming: false, content: m.content || "…" }));
       } else {
         patch(m => ({ ...m, streaming: false, content: (m.content || "") + (m.content ? "\n\n" : "") + `⚠️ 连接失败：${e}` }));
       }
@@ -318,7 +319,7 @@ export default function ChatPage() {
 
   async function deleteConv(id: string, e: React.MouseEvent) {
     e.stopPropagation();
-    if (!window.confirm("确定删除这个对话吗？")) return;
+    if (!window.confirm(t("chat_del_conv"))) return;
     await api.deleteConversation(id);
     if (id === convId) newChat();
     refreshLists();
@@ -330,9 +331,9 @@ export default function ChatPage() {
   const groupOf = (c: ConversationInfo) => {
     const d = new Date((c.created_at || "").replace(" ", "T"));
     const days = (Date.now() - d.getTime()) / 86400000;
-    if (days < 1 && new Date().getDate() === d.getDate()) return "今天";
-    if (days < 7) return "7 天内";
-    return "更早";
+    if (days < 1 && new Date().getDate() === d.getDate()) return t("chat_group_today");
+    if (days < 7) return t("chat_group_week");
+    return t("chat_group_earlier");
   };
   const groups: [string, ConversationInfo[]][] = (() => {
     const map = new Map<string, ConversationInfo[]>();
@@ -350,12 +351,12 @@ export default function ChatPage() {
         {/* 会话侧栏 */}
         <aside className="conv-sidebar">
           <div style={{ padding: "12px 14px 8px" }}>
-            <button className="primary" style={{ width: "100%" }} onClick={newChat}>＋ 新对话</button>
+            <button className="primary" style={{ width: "100%" }} onClick={newChat}>{t("chat_new")}</button>
           </div>
           <div style={{ padding: "0 14px 10px" }}>
             <input
               type="text"
-              placeholder="搜索对话标题…"
+              placeholder={t("chat_search_conv")}
               value={convSearch}
               onChange={e => setConvSearch(e.target.value)}
             />
@@ -371,15 +372,15 @@ export default function ChatPage() {
                     onClick={() => loadConversation(c.id)}
                     title={c.title}
                   >
-                    <span className="conv-title">{c.title || "新对话"}</span>
+                    <span className="conv-title">{c.title || t("chat_new").replace("＋ ", "")}</span>
                     <span className="conv-time">{(c.created_at || "").slice(5, 16).replace("T", " ")}</span>
-                    <button className="conv-del" onClick={e => deleteConv(c.id, e)} title="删除">✕</button>
+                    <button className="conv-del" onClick={e => deleteConv(c.id, e)} title={t("lib_delete")}>✕</button>
                   </div>
                 ))}
               </div>
             ))}
             {!filteredConvs.length && (
-              <div style={{ fontSize: 12, color: "var(--text-3)", padding: "10px 6px" }}>无匹配对话</div>
+              <div style={{ fontSize: 12, color: "var(--text-3)", padding: "10px 6px" }}>{t("chat_no_conv")}</div>
             )}
           </div>
         </aside>
@@ -390,13 +391,15 @@ export default function ChatPage() {
             {messages.length === 0 && (
               <div className="empty-state">
                 <div className="big">🧠</div>
-                <h3 style={{ color: "var(--text-2)", margin: "0 0 8px" }}>问一个文献库里的问题</h3>
-                <div>每个论断都带页码级引用，点击角标回到原文核对。</div>
+                <h3 style={{ color: "var(--text-2)", margin: "0 0 8px" }}>{t("chat_empty_title")}</h3>
+                <div>{t("chat_empty_sub")}</div>
                 <div style={{ marginTop: 10, fontSize: 12.5 }}>
-                  在输入框输入 <code className="kbd">@</code> 可限定只在某几篇文献内提问。
+                  <span dangerouslySetInnerHTML={{
+                    __html: t("chat_empty_at").replace("@", '<code class="kbd">@</code>'),
+                  }} />
                 </div>
                 <div style={{ marginTop: 18, display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
-                  {SUGGESTIONS.map(q => (
+                  {suggestions.map(q => (
                     <button key={q} className="small" onClick={() => send(q)}>{q}</button>
                   ))}
                 </div>
@@ -404,7 +407,7 @@ export default function ChatPage() {
             )}
             {messages.map((m, i) => (
               <div key={i} className={`msg ${m.role}`}>
-                <div className="role">{m.role === "user" ? "你" : "Cortex"}</div>
+                <div className="role">{m.role === "user" ? t("role_you") : t("role_cortex")}</div>
 
                 {m.role === "assistant" && (
                   <ProcessBlock m={m} onOpenEvidence={openEvidence} />
@@ -415,23 +418,23 @@ export default function ChatPage() {
                     ? <span style={{ whiteSpace: "pre-wrap" }}>{m.content}</span>
                     : (m.content
                       ? <Markdown text={m.content} citations={m.citations} onCite={openCitation} />
-                      : (m.streaming && <span className="thinking"><span className="pulse">●</span> 正在思考…</span>))}
+                      : (m.streaming && <span className="thinking"><span className="pulse">●</span> {t("chat_thinking")}</span>))}
                   {m.streaming && m.content && <span className="thinking pulse">▍</span>}
-                  {m.stopped && <div className="stopped-note">⏹ 已停止生成</div>}
+                  {m.stopped && <div className="stopped-note">{t("chat_stopped")}</div>}
                 </div>
 
                 {/* 悬浮操作栏 */}
                 {m.role === "assistant" && !m.streaming && m.content && (
                   <div className="msg-actions">
-                    <button className="action-btn" onClick={() => copyMessage(i)} title="复制 Markdown">
-                      {copiedIdx === i ? "✓ 已复制" : "⧉ 复制"}
+                    <button className="action-btn" onClick={() => copyMessage(i)} title="Markdown">
+                      {copiedIdx === i ? t("chat_copied") : t("chat_copy")}
                     </button>
-                    <button className="action-btn" onClick={regenerate} disabled={busy} title="用同一问题再问一次">
-                      ↻ 重新提问
+                    <button className="action-btn" onClick={regenerate} disabled={busy} title={t("chat_reask")}>
+                      {t("chat_reask")}
                     </button>
                     {m.citations.length > 0 && (
-                      <span className="cite-verified" title="所有引用编号均已通过证据校验">
-                        ✓ {m.citations.length} 条引用已核验
+                      <span className="cite-verified" title={t("chat_verified", { n: m.citations.length })}>
+                        ✓ {t("chat_verified", { n: m.citations.length }).replace("✓ ", "")}
                       </span>
                     )}
                   </div>
@@ -442,25 +445,25 @@ export default function ChatPage() {
           <div className="chat-input-area">
             {scopeDocs.length > 0 && (
               <div className="scope-chips">
-                <span className="scope-hint">限定范围：</span>
+                <span className="scope-hint">{t("chat_scope_hint")}</span>
                 {scopeDocs.map(d => (
                   <span key={d.id} className="scope-chip" title={d.title}>
                     《{d.title.slice(0, 28)}》{d.title.length > 28 ? "…" : ""}
-                    <button onClick={() => setScopeIds(ids => ids.filter(x => x !== d.id))}>✕</button>
+                    <button onClick={() => setScopeIds(ids => ids.filter(x => x !== d.id))} title={t("chat_scope_del")}>✕</button>
                   </span>
                 ))}
-                <button className="scope-clear" onClick={() => setScopeIds([])}>清除全部</button>
+                <button className="scope-clear" onClick={() => setScopeIds([])}>{t("chat_scope_clear")}</button>
               </div>
             )}
             <div className="chat-input-box">
               <textarea
                 ref={taRef}
                 rows={1}
-                placeholder="向文献库提问，@ 可限定文献范围…（Enter 发送，Shift+Enter 换行）"
+                placeholder={t("chat_input_ph")}
                 value={input}
                 onChange={e => { setInput(e.target.value); autoGrow(); detectMention(e.target.value); }}
-                onClick={detectMention}
-                onKeyUp={detectMention}
+                onClick={() => detectMention()}
+                onKeyUp={() => detectMention()}
                 onKeyDown={e => {
                   if (mention && mentionCandidates.length) {
                     if (e.key === "ArrowDown") { e.preventDefault(); setMentionIdx(i => (i + 1) % mentionCandidates.length); return; }
@@ -478,15 +481,15 @@ export default function ChatPage() {
                 autoFocus
               />
               {busy ? (
-                <button className="stop-btn" onClick={stop} title="停止生成">⏹ 停止</button>
+                <button className="stop-btn" onClick={stop} title={t("chat_stop")}>{t("chat_stop")}</button>
               ) : (
                 <button className="primary send-btn" onClick={() => send()} disabled={!input.trim()}>
-                  发送
+                  {t("chat_send")}
                 </button>
               )}
               {mention && mentionCandidates.length > 0 && (
                 <div className="mention-dropdown">
-                  <div className="mention-head">限定到文献（可多次 @ 多选）</div>
+                  <div className="mention-head">{t("chat_mention_head")}</div>
                   {mentionCandidates.map((d, i) => (
                     <div
                       key={d.id}
@@ -508,7 +511,7 @@ export default function ChatPage() {
         <div
           className="pdf-rail"
           onClick={() => setPdfOpen(o => !o)}
-          title={pdfOpen ? "收起原文面板" : "打开原文面板"}
+          title={pdfOpen ? t("chat_pdf_open") : t("chat_pdf_closed")}
         >
           <span className="pdf-rail-icon">{pdfOpen ? "»" : "«"}</span>
           <span className="pdf-rail-doc">📄</span>

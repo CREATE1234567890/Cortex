@@ -74,13 +74,26 @@ EVIDENCE_BLOCK = """<context>
 {blocks}
 </context>"""
 
-REFUSAL_TEMPLATE = """**库中未找到足够的相关证据，无法可靠回答该问题。**
+REFUSAL_ZH = """**库中未找到足够的相关证据，无法可靠回答该问题。**
 
 本次检索使用的关键词：`{query}`，在 {n_docs} 篇文献的索引中最接近的内容如下：
 
 {nearest}
 
 如需回答此问题，建议补充相关文献入库，或换个问法（更具体的方法名/数据集名/指标名）。"""
+
+REFUSAL_EN = """**Not enough relevant evidence in your library to answer this reliably.**
+
+Query used: `{query}`. The closest matches among {n_docs} indexed papers:
+
+{nearest}
+
+Consider importing more related papers, or rephrase with more specific method/dataset/metric names."""
+
+
+def _refusal(query: str, n_docs: int, nearest: str, question: str) -> str:
+    tpl = REFUSAL_ZH if re.search(r"[\u4e00-\u9fff]", question) else REFUSAL_EN
+    return tpl.format(query=query, n_docs=n_docs, nearest=nearest)
 
 
 def _format_evidence_blocks(evidences: list[Evidence]) -> str:
@@ -153,10 +166,16 @@ def _system_prompt(n_evidence: int, memory_text: str | None) -> str:
 
 
 def evidence_only_answer(question: str, evidences: list[Evidence]) -> str:
-    """LLM 未配置时的降级：直接列出证据块。"""
+    """LLM 未配置时的降级：直接列出证据块。文案跟随提问语言。"""
+    zh = bool(re.search(r"[\u4e00-\u9fff]", question))
     if not evidences:
-        return "知识库当前为空或未命中相关内容。请先在「文献库」页导入 PDF。"
-    lines = [f"未配置 LLM（可在「设置」页填写 API Key），以下是与 **{question}** 最相关的库内证据：", ""]
+        return ("知识库当前为空或未命中相关内容。请先在「文献库」页导入 PDF。"
+                if zh else
+                "The library is empty or nothing matched. Import PDFs on the Library page first.")
+    head = (f"未配置 LLM（可在「设置」页填写 API Key），以下是与 **{question}** 最相关的库内证据："
+            if zh else
+            f"No LLM configured (add an API Key in Settings). Closest evidence in your library for **{question}**:")
+    lines = [head, ""]
     for ev in evidences:
         lines.append(f"**[{ev.n}] 《{ev.title}》 p.{ev.page_start}**")
         if ev.section_path:
@@ -233,7 +252,7 @@ def stream_answer(conversation_id: str, question: str,
 
     if not llm_ready():
         if not evidences:
-            answer = "知识库当前为空或未命中相关内容。请先在「文献库」页导入 PDF。"
+            answer = evidence_only_answer(question, [])
             yield {"event": "delta", "data": {"text": answer}}
             _save_assistant(conversation_id, answer, [])
             yield {"event": "citations", "data": {"citations": []}}
@@ -350,7 +369,7 @@ def stream_answer(conversation_id: str, question: str,
         nearest = retrieve(question, top_k=3)
         near_txt = "\n".join(
             f"- 《{ev.title}》 p.{ev.page_start}：{ev.snippet}…" for ev in nearest) or "（无）"
-        answer = REFUSAL_TEMPLATE.format(query=question, n_docs=n_docs, nearest=near_txt)
+        answer = _refusal(question, n_docs, near_txt, question)
         yield {"event": "delta", "data": {"text": answer}}
         _save_assistant(conversation_id, answer, [])
         yield {"event": "citations", "data": {"citations": []}}

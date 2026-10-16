@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { useLang } from "@/components/Lang";
 
 export default function SettingsPage() {
+  const { t } = useLang();
   const [s, setS] = useState<Record<string, string | boolean>>({});
   const [msg, setMsg] = useState("");
   const [testing, setTesting] = useState(false);
@@ -32,9 +34,9 @@ export default function SettingsPage() {
     try {
       const updated = await api.saveSettings(patch);
       setS(updated);
-      toast("已保存");
+      toast(t("set_saved"));
       setTestResult("");
-    } catch (e) { toast(`保存失败：${e}`); }
+    } catch (e) { toast(t("set_save_fail", { e: String(e) })); }
   }
 
   async function test() {
@@ -42,7 +44,7 @@ export default function SettingsPage() {
     setTestResult("");
     try {
       const r = await api.testLlm();
-      setTestResult(r.ok ? `✅ 连接正常，模型回复：${r.reply}` : `❌ ${r.error}`);
+      setTestResult(r.ok ? `✅ ${r.reply}` : `❌ ${r.error}`);
     } catch (e) { setTestResult(`❌ ${e}`); }
     finally { setTesting(false); }
   }
@@ -50,29 +52,29 @@ export default function SettingsPage() {
   return (
     <div className="page">
       <div className="content-page" style={{ maxWidth: 820 }}>
-        <h2>设置</h2>
-        <p className="sub">模型连接与知识库路径。API Key 仅保存在本机 SQLite，不会上传。</p>
+        <h2>{t("set_title")}</h2>
+        <p className="sub">{t("set_sub")}</p>
 
         <div className="card">
-          <h3>LLM（OpenAI 兼容接口）</h3>
+          <h3>{t("set_llm_card")}</h3>
           <div className="form-grid">
-            <label>接口地址 Base URL</label>
+            <label>{t("set_base_url")}</label>
             <input
               type="text" value={String(s.llm_base_url ?? "")}
               onChange={e => set("llm_base_url", e.target.value)}
               placeholder="https://api.deepseek.com"
             />
-            <label>模型名称</label>
+            <label>{t("set_model")}</label>
             <input
               type="text" value={String(s.llm_model ?? "")}
               onChange={e => set("llm_model", e.target.value)}
               placeholder="deepseek-chat / glm-4.7 / qwen3:8b"
             />
-            <label>API Key</label>
+            <label>{t("set_api_key")}</label>
             <input
               type="password" value={String(s.llm_api_key ?? "")}
               onChange={e => set("llm_api_key", e.target.value)}
-              placeholder={s.llm_api_key ? "已保存（输入新值覆盖）" : "sk-…"}
+              placeholder={s.llm_api_key ? t("set_key_saved") : "sk-…"}
             />
             <div />
             <div className="form-hint">
@@ -83,17 +85,17 @@ export default function SettingsPage() {
         </div>
 
         <div className="card">
-          <h3>知识库</h3>
+          <h3>{t("set_kb_card")}</h3>
           <div className="form-grid">
-            <label>论文文件夹路径</label>
+            <label>{t("set_kb_root")}</label>
             <input
               type="text" value={String(s.kb_root ?? "")}
               onChange={e => set("kb_root", e.target.value)}
               placeholder="C:\Users\you\Desktop\论文"
             />
             <div />
-            <div className="form-hint">「文献库」页扫描时的默认根目录；所有 PDF 与索引数据均保存在本机 backend/data/。</div>
-            <label>多轮对话携带轮数</label>
+            <div className="form-hint">{t("set_kb_hint")}</div>
+            <label>{t("set_history")}</label>
             <input
               type="number" min={0} max={10} style={{ width: 100 }}
               value={String(s.history_turns ?? "6")}
@@ -103,14 +105,14 @@ export default function SettingsPage() {
         </div>
 
         <div className="card">
-          <h3>嵌入模型</h3>
+          <h3>{t("set_embed_card")}</h3>
           <div style={{ fontSize: 13, color: "var(--text-2)" }}>
-            当前：<code>{String(s.embed_model ?? "…")}</code>（本地 CPU 推理，更换模型需重建索引，第一版暂不支持在线切换）
+            {t("set_embed_now")}<code>{String(s.embed_model ?? "…")}</code>{t("set_embed_hint")}
           </div>
         </div>
 
         <div className="card">
-          <h3>长期记忆</h3>
+          <h3>{t("set_memory_card")}</h3>
           <div className="row" style={{ marginBottom: 10 }}>
             <label className="checkbox-row">
               <input
@@ -118,30 +120,30 @@ export default function SettingsPage() {
                 onChange={async e => {
                   setMemEnabled(e.target.checked);
                   await api.toggleMemory(e.target.checked);
-                  toast(e.target.checked ? "已开启记忆" : "已关闭记忆");
+                  toast(e.target.checked ? t("set_mem_on") : t("set_mem_off"));
                 }}
               />
-              开启：从对话中沉淀你的研究方向与偏好，提问时自动参考
+              {t("set_memory_on")}
             </label>
             <span style={{ flex: 1 }} />
             <button
               className="small danger"
               onClick={async () => {
-                if (!window.confirm("确定清空全部长期记忆吗？")) return;
+                if (!window.confirm(t("set_del_confirm"))) return;
                 await api.clearMemories();
                 loadMemories();
                 toast("已清空");
               }}
               disabled={!memories.length}
-            >清空记忆</button>
+            >{t("set_memory_clear")}</button>
           </div>
           {memories.length === 0 ? (
             <div style={{ fontSize: 13, color: "var(--text-3)", padding: "8px 0" }}>
-              还没有记忆。多问几轮后，Cortex 会自动记住你的研究方向与偏好（此处的记忆只保存在本机）。
+              {t("set_memory_none")}
             </div>
           ) : (
             <table className="tbl">
-              <thead><tr><th style={{ width: 110 }}>类型</th><th>内容</th><th style={{ width: 40 }}></th></tr></thead>
+              <thead><tr><th style={{ width: 110 }}>{t("set_col_type")}</th><th>{t("set_col_content")}</th><th style={{ width: 40 }}></th></tr></thead>
               <tbody>
                 {memories.map(m => (
                   <tr key={m.id}>
@@ -162,9 +164,9 @@ export default function SettingsPage() {
         </div>
 
         <div className="row">
-          <button className="primary" onClick={save}>保存设置</button>
+          <button className="primary" onClick={save}>{t("set_save")}</button>
           <button onClick={test} disabled={testing || !s.llm_api_key}>
-            {testing ? <span className="spin" /> : "测试 LLM 连接"}
+            {testing ? <span className="spin" /> : t("set_test")}
           </button>
           {testResult && <span style={{ fontSize: 13 }}>{testResult}</span>}
         </div>
