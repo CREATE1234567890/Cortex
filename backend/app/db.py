@@ -148,6 +148,12 @@ def init_db():
             conn.execute("DROP TABLE chunks_fts")
             conn.execute("DROP TRIGGER IF EXISTS chunks_fts_ai")
             conn.execute("DROP TRIGGER IF EXISTS chunks_fts_ad")
+        # 迁移：documents 增量加列（venue 会议/期刊，category 类别）
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(documents)")}
+        if "venue" not in cols:
+            conn.execute("ALTER TABLE documents ADD COLUMN venue TEXT")
+        if "category" not in cols:
+            conn.execute("ALTER TABLE documents ADD COLUMN category TEXT")
         conn.executescript(SCHEMA)
         # 重建/补齐全文索引内容（external-content 依据 chunks 表全量灌入）
         cnt = conn.execute("SELECT count(*) c FROM chunks_fts").fetchone()["c"]

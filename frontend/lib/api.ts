@@ -31,6 +31,8 @@ export interface DocumentInfo {
   title: string;
   filename: string;
   year: number | null;
+  venue: string | null;
+  category: string | null;
   status: string;
   n_pages: number;
   n_chunks: number;

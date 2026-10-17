@@ -19,6 +19,7 @@ from .db import db, row_to_dict
 from .embedding import embed_passages
 from .indexer import get_index
 from .parsing.pdf_parser import parse_pdf
+from .classify import classify as classify_doc
 
 _scan_lock = threading.Lock()
 _ingest_thread: threading.Thread | None = None
@@ -82,7 +83,7 @@ def get_doc(doc_id: str) -> dict | None:
 def list_documents() -> list[dict]:
     with db() as conn:
         rows = conn.execute(
-            "SELECT id, title, filename, year, status, n_pages, n_chunks, error, created_at, indexed_at "
+            "SELECT id, title, filename, year, venue, category, status, n_pages, n_chunks, error, created_at, indexed_at "
             "FROM documents ORDER BY created_at DESC"
         ).fetchall()
         return [row_to_dict(r) for r in rows]
@@ -227,12 +228,14 @@ def process_document(doc_id: str) -> bool:
                      c["block_type"]),
                 )
                 new_ids.append(cur.lastrowid)
+            category, venue = classify_doc(
+                doc["pdf_path"], config.get_kb_root(), payload["title"] or "")
             conn.execute(
                 "UPDATE documents SET status='indexed', n_pages=?, n_chunks=?, error=NULL, "
-                "indexed_at=datetime('now'), title=?, year=? WHERE id=?",
+                "indexed_at=datetime('now'), title=?, year=?, venue=?, category=? WHERE id=?",
                 (payload["n_pages"], len(chunks),
                  _valid_title(payload["title"], doc["filename"]),
-                 payload["year"], doc_id),
+                 payload["year"], venue or None, category or None, doc_id),
             )
         index.append(new_ids, vectors)
         index.save()

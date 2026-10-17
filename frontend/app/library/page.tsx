@@ -66,6 +66,8 @@ export default function LibraryPage() {
   }
 
   const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [venueFilter, setVenueFilter] = useState("");
+  const [catFilter, setCatFilter] = useState("");
 
   async function retry(id: string) {
     setRetryingId(id);
@@ -83,6 +85,11 @@ export default function LibraryPage() {
     toast(t("lib_deleted"));
     refresh();
   }
+
+  const venues = [...new Set(docs.map(d => d.venue).filter((v): v is string => !!v))].sort((a, b) => a.localeCompare(b));
+  const categories = [...new Set(docs.map(d => d.category).filter((c): c is string => !!c))].sort((a, b) => a.localeCompare(b));
+  const visibleDocs = docs.filter(d =>
+    (!venueFilter || d.venue === venueFilter) && (!catFilter || d.category === catFilter));
 
   const filtered = scanned?.filter(f => !filter || f.filename.toLowerCase().includes(filter.toLowerCase())) ?? null;
   const running = job?.state === "running";
@@ -168,11 +175,28 @@ export default function LibraryPage() {
         </div>
 
         <div className="card">
+          <div className="row wrap" style={{ marginBottom: 12 }}>
+            <span style={{ fontSize: 13, color: "var(--text-2)" }}>{t("lib_filter_cat")}</span>
+            <select style={{ width: 160 }} value={catFilter} onChange={e => setCatFilter(e.target.value)}>
+              <option value="">{t("lib_all")}</option>
+              {categories.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <span style={{ fontSize: 13, color: "var(--text-2)" }}>{t("lib_filter_venue")}</span>
+            <select style={{ width: 160 }} value={venueFilter} onChange={e => setVenueFilter(e.target.value)}>
+              <option value="">{t("lib_all")}</option>
+              {venues.map(v => <option key={v} value={v}>{v}</option>)}
+            </select>
+            {(venueFilter || catFilter) && (
+              <button className="small" onClick={() => { setVenueFilter(""); setCatFilter(""); }}>
+                {t("chat_scope_clear")}
+              </button>
+            )}
+          </div>
           <h3>
-            {t("lib_docs", { n: docs.length })}
-            {docs.some(d => d.status === "failed") && (
+            {t("lib_docs", { n: visibleDocs.length })}
+            {visibleDocs.some(d => d.status === "failed") && (
               <span style={{ fontSize: 12, color: "var(--red)", fontWeight: 400, marginLeft: 10 }}>
-                {t("lib_failed_hint", { n: docs.filter(d => d.status === "failed").length })}
+                {t("lib_failed_hint", { n: visibleDocs.filter(d => d.status === "failed").length })}
               </span>
             )}
           </h3>
@@ -184,11 +208,11 @@ export default function LibraryPage() {
             <table className="tbl">
               <thead>
                 <tr>
-                  <th>{t("lib_col_title")}</th><th>{t("lib_col_status")}</th><th>{t("lib_col_pages")}</th><th>{t("lib_col_chunks")}</th><th>{t("lib_col_time")}</th><th style={{ width: 130 }}></th>
+                  <th>{t("lib_col_title")}</th><th>{t("lib_col_venue")}</th><th>{t("lib_col_status")}</th><th>{t("lib_col_pages")}</th><th>{t("lib_col_chunks")}</th><th>{t("lib_col_time")}</th><th style={{ width: 130 }}></th>
                 </tr>
               </thead>
               <tbody>
-                {docs.map(d => (
+                {visibleDocs.map(d => (
                   <tr key={d.id}>
                     <td>
                       <div style={{ fontWeight: 500 }}>{d.title || d.filename}</div>
@@ -196,6 +220,7 @@ export default function LibraryPage() {
                         {d.filename}{d.error ? ` — ${d.error}` : ""}
                       </div>
                     </td>
+                    <td>{d.venue ? <span className="badge pending">{d.venue}</span> : <span style={{ color: "var(--text-3)" }}>—</span>}</td>
                     <td><span className={`badge ${d.status}`}>{t(`status_${d.status}`)}</span></td>
                     <td>{d.n_pages || "—"}</td>
                     <td>{d.n_chunks || "—"}</td>
