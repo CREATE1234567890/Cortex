@@ -261,6 +261,8 @@ def start_ingest(paths: list[str], incremental: bool = True) -> dict:
     with _scan_lock:
         if _ingest_thread and _ingest_thread.is_alive():
             return {"started": False, "reason": "已有摄取任务在运行"}
+        if _reembed_thread and _reembed_thread.is_alive():
+            return {"started": False, "reason": "重嵌入进行中，请稍后再试"}
         _stop_event.clear()
         doc_ids: list[str] = []
         failed_register = []
@@ -310,6 +312,8 @@ def reembed_all() -> dict:
     with _scan_lock:
         if _reembed_thread and _reembed_thread.is_alive():
             return {"started": False, "reason": "重嵌入已在运行"}
+        if _ingest_thread and _ingest_thread.is_alive():
+            return {"started": False, "reason": "摄取任务进行中，请稍后再试"}
 
         def worker():
             try:
@@ -322,6 +326,9 @@ def reembed_all() -> dict:
                          message="全量重嵌入", current_file="")
                 index = get_index()
                 for i, d in enumerate(docs, 1):
+                    if _stop_event.is_set():
+                        _set_job(state="error", message="重嵌入已取消")
+                        return
                     _set_job(current_file=f"重嵌入 {i}/{total}: {d['title'][:40]}")
                     with db() as conn:
                         rows = conn.execute(

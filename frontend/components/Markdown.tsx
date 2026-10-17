@@ -95,12 +95,13 @@ function renderInline(
     if (m) {
       const n = parseInt(m[1], 10);
       const cit = citations.get(n);
+      if (!cit) return null; // 引用验证未兜底的编号不渲染（与后端验证结果保持一致）
       return (
         <span
           key={key}
           className="cite"
-          title={cit ? `《${cit.title}》 p.${cit.page}${cit.section_path?.length ? " ｜ " + cit.section_path.join(" > ") : ""}` : `[${n}]`}
-          onClick={e => { e.stopPropagation(); if (cit) onCite(cit); }}
+          title={`《${cit.title}》 p.${cit.page}${cit.section_path?.length ? " ｜ " + cit.section_path.join(" > ") : ""}`}
+          onClick={e => { e.stopPropagation(); onCite(cit); }}
         >
           {n}
         </span>

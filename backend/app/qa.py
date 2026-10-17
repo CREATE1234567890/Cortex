@@ -171,6 +171,10 @@ def _user_message(question: str, evidences: list[Evidence], memory_text: str | N
         parts.append(MEMORY_BLOCK.replace("{memories}", memory_text))
     parts.append(EVIDENCE_BLOCK.format(blocks=_format_evidence_blocks(evidences) or "（初始检索无结果）"))
     parts.append(f"<question>{question}</question>")
+    if not re.search(r"[\u4e00-\u9fff]", question):
+        # 提问语言优先于记忆中的语言偏好（记忆可能记着“偏好中文”）
+        parts.append("(IMPORTANT: the user wrote this turn in English — reply in English "
+                     "this turn, even if stored memory mentions a Chinese preference.)")
     parts.append(f"（当前共有编号 [1]–[{len(evidences)}] 的证据块，补充检索可能增加编号。）")
     return "\n\n".join(parts)
 
@@ -207,7 +211,8 @@ def _memory_for(question: str) -> str | None:
         return None
 
 
-def _run_search_kb(args: dict, evidences: list[Evidence], seen: set[int]) -> tuple[list[Evidence], str]:
+def _run_search_kb(args: dict, evidences: list[Evidence], seen: set[int],
+                   doc_ids: list[str] | None = None) -> tuple[list[Evidence], str]:
     """执行 search_kb 工具：追加新证据（全局重编号），返回(新增证据, 给模型的文本)。"""
     query = str(args.get("query", "")).strip()
     try:
@@ -217,7 +222,7 @@ def _run_search_kb(args: dict, evidences: list[Evidence], seen: set[int]) -> tup
     k = min(max(k, 1), 8)
     if not query:
         return [], "（查询为空，未检索）"
-    results = retrieve(query, top_k=k)
+    results = retrieve(query, top_k=k, doc_ids=doc_ids)
     new = [ev for ev in results if ev.chunk_id not in seen]
     for ev in new:
         seen.add(ev.chunk_id)
@@ -336,7 +341,7 @@ def stream_answer(conversation_id: str, question: str,
                     args = {}
                 query = str(args.get("query", ""))
                 yield {"event": "tool", "data": {"phase": "start", "query": query}}
-                new, result_text = _run_search_kb(args, evidences, seen)
+                new, result_text = _run_search_kb(args, evidences, seen, doc_ids)
                 yield {"event": "tool", "data": {
                     "phase": "done", "query": query, "added": len(new),
                     "total": len(evidences), "evidences": ev_payload(new),
@@ -453,10 +458,10 @@ def new_conversation(title: str = "新对话") -> str:
 
 
 def maybe_rename_conversation(conversation_id: str, first_question: str):
+    """标题仍是默认名时用首问重命名（旧条件“消息数≤1”在首轮结束后永远为假）。"""
     with db() as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) c FROM messages WHERE conversation_id=?", (conversation_id,)
-        ).fetchone()
-        if row["c"] <= 1:
+        row = conn.execute("SELECT title FROM conversations WHERE id=?", (conversation_id,)
+                           ).fetchone()
+        if row and (row["title"] or "") == "新对话":
             conn.execute("UPDATE conversations SET title=? WHERE id=?",
                          (first_question[:40], conversation_id))
