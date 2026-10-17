@@ -197,6 +197,7 @@ class SettingsReq(BaseModel):
     llm_api_key: str | None = None
     llm_model: str | None = None
     history_turns: str | None = None
+    rerank_enabled: str | None = None
 
 
 MASK = "********"
@@ -210,6 +211,7 @@ def get_settings():
         "llm_model": get_setting("llm_model", config.DEFAULT_LLM_MODEL),
         "llm_api_key": MASK if get_setting("llm_api_key", "") else "",
         "history_turns": get_setting("history_turns", str(config.HISTORY_TURNS)),
+        "rerank_enabled": get_setting("rerank_enabled", "on") == "on",
         "llm_ready": llm_ready(),
         "embed_model": config.EMBED_MODEL,
     }

@@ -12,12 +12,13 @@ export default function SettingsPage() {
   const [testResult, setTestResult] = useState("");
   const [memories, setMemories] = useState<{ id: number; kind: string; content: string; created_at: string }[]>([]);
   const [memEnabled, setMemEnabled] = useState(true);
+  const [rerankEnabled, setRerankEnabled] = useState(true);
 
   const loadMemories = () => {
     api.memories().then(r => { setMemories(r.items); setMemEnabled(r.enabled); }).catch(() => {});
   };
   useEffect(() => {
-    api.settings().then(setS).catch(() => {});
+    api.settings().then(s => { setS(s); setRerankEnabled(s.rerank_enabled === true || s.rerank_enabled === "true"); }).catch(() => {});
     loadMemories();
   }, []);
 
@@ -102,6 +103,25 @@ export default function SettingsPage() {
               onChange={e => set("history_turns", e.target.value)}
             />
           </div>
+        </div>
+
+        <div className="card">
+          <h3>{t("set_rerank_card")}</h3>
+          <label className="checkbox-row">
+            <input
+              type="checkbox" checked={rerankEnabled}
+              onChange={async e => {
+                setRerankEnabled(e.target.checked);
+                await fetch(`${process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8300"}/api/settings`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ rerank_enabled: e.target.checked ? "on" : "off" }),
+                });
+                toast(t("set_saved"));
+              }}
+            />
+            {t("set_rerank_on")}
+          </label>
         </div>
 
         <div className="card">

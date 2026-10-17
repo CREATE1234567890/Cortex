@@ -137,6 +137,11 @@ const DICT: Record<string, { zh: string; en: string }> = {
     en: "Default root for the Library page scan; all PDFs and indexes stay in local backend/data/.",
   },
   set_history: { zh: "多轮对话携带轮数", en: "History turns" },
+  set_rerank_card: { zh: "检索精排（Rerank）", en: "Retrieval rerank" },
+  set_rerank_on: {
+    zh: "开启：对融合后的候选证据用 cross-encoder 精排（更准，CPU 每次问答约多 1–2 秒）",
+    en: "On: cross-encoder reranks fused candidates (more accurate, +1–2s per question on CPU)",
+  },
   set_embed_card: { zh: "嵌入模型", en: "Embedding model" },
   set_embed_now: { zh: "当前：", en: "Current: " },
   set_embed_hint: {

@@ -49,11 +49,33 @@ def retrieve(query: str, top_k: int = config.FINAL_TOPK,
         pass  # 模型未就绪时退化为纯 BM25
     bm25_hits = fts_search(query, config.BM25_TOPK, allowed)
 
-    fused = rrf_fuse(dense_hits, bm25_hits)[:top_k]
-    if not fused:
+    fused = rrf_fuse(dense_hits, bm25_hits)
+
+    # Rerank 精排（FR-IR-03）：融合候选取前 RERANK_CANDIDATES，cross-encoder 重排
+    reranked = False
+    if len(fused) > top_k:
+        try:
+            from .reranker import rerank as _rerank, rerank_ready
+            cand = fused[:config.RERANK_CANDIDATES]
+            with db() as conn:
+                qmarks = ",".join("?" * len(cand))
+                rows = conn.execute(
+                    f"SELECT id, text FROM chunks WHERE id IN ({qmarks})",
+                    [cid for cid, _ in cand]).fetchall()
+            text_by_id = {r["id"]: r["text"] for r in rows}
+            pairs = [(cid, text_by_id[cid]) for cid, _ in cand if cid in text_by_id]
+            if pairs and rerank_ready():
+                scored = _rerank(query, pairs)
+                fused = scored + fused[config.RERANK_CANDIDATES:]
+                reranked = True
+        except Exception:
+            reranked = False  # 重排任何异常都退回 RRF 原序
+
+    top = fused[:top_k]
+    if not top:
         return []
 
-    id2score = dict(fused)
+    id2score = dict(top)
     with db() as conn:
         q = ",".join("?" * len(id2score))
         rows = conn.execute(

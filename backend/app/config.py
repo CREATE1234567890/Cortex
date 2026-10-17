@@ -43,6 +43,15 @@ BM25_TOPK = 24         # 关键词召回
 RRF_K = 60             # RRF 融合常数
 FINAL_TOPK = 8         # 进入上下文的证据块数
 
+# --- Rerank 精排（FR-IR-03）---
+_LOCAL_RERANK_DIR = DATA_DIR / "models" / "bge-reranker-base"
+RERANK_MODEL = os.getenv(
+    "CORTEX_RERANK_MODEL",
+    str(_LOCAL_RERANK_DIR) if _LOCAL_RERANK_DIR.exists() else "BAAI/bge-reranker-base",
+)
+RERANK_CANDIDATES = 16   # 送入重排的融合后候选数（CPU 耗时与候选数线性）
+RERANK_MAX_LEN = 384     # 重排输入截断长度（token，越短越快）
+
 # --- 切块参数 ---
 CHUNK_TARGET_TOKENS = 500
 CHUNK_MAX_TOKENS = 700
