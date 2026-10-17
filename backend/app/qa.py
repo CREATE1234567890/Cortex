@@ -29,8 +29,28 @@ from .llm import chat, llm_ready
 from .retriever import Evidence, retrieve
 
 CIT_RE = re.compile(r"\[(\d{1,2})\]")
+WCIT_RE = re.compile(r"\[W(\d{1,2})\]")
 
 MAX_TOOL_ROUNDS = 3
+
+WEB_TOOLS = [{
+    "type": "function",
+    "function": {
+        "name": "search_web",
+        "description": (
+            "在公共学术数据库（arXiv / Semantic Scholar）在线检索库外文献。"
+            "当本地证据不足、问题涉及最新进展或库中未收录的论文时调用。"
+            "结果属于库外来源，引用时使用 [W1]、[W2] 编号（与本地证据编号分开）。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "英文学术检索词（效果最佳）"},
+            },
+            "required": ["query"],
+        },
+    },
+}]
 
 TOOLS = [{
     "type": "function",
@@ -108,10 +128,15 @@ def _format_evidence_blocks(evidences: list[Evidence]) -> str:
     return "\n\n".join(parts)
 
 
-def _validate_citations(text: str, evidences: list[Evidence]) -> tuple[str, list[dict]]:
-    """引用验证 pass：剔除不存在/越界的 [n]；返回(清理后文本, 引用元数据)。"""
+def _validate_citations(text: str, evidences: list[Evidence],
+                        web_results: list[dict] | None = None) -> tuple[str, list[dict]]:
+    """引用验证 pass：剔除不存在/越界的 [n] 与 [Wk]；返回(清理后文本, 引用元数据)。
+
+    [n] 必须命中本地证据；[Wk] 必须命中库外检索结果（编号即列表序）。
+    """
     valid_ns = {ev.n for ev in evidences}
     used: list[int] = []
+    used_w: list[str] = []
 
     def repl(m: re.Match) -> str:
         n = int(m.group(1))
@@ -122,6 +147,18 @@ def _validate_citations(text: str, evidences: list[Evidence]) -> tuple[str, list
         return ""  # 幻觉引用直接删除
 
     cleaned = CIT_RE.sub(repl, text)
+
+    def wrepl(m: re.Match) -> str:
+        k = int(m.group(1))
+        if web_results and 1 <= k <= len(web_results):
+            key = f"W{k}"
+            if key not in used_w:
+                used_w.append(key)
+            return m.group(0)
+        return ""  # 库外幻觉引用剔除
+
+    cleaned = WCIT_RE.sub(wrepl, cleaned)
+
     citations = []
     for n in used:
         ev = evidences[n - 1]
@@ -137,6 +174,13 @@ def _validate_citations(text: str, evidences: list[Evidence]) -> tuple[str, list
             "bboxes": ev.bboxes,
             "block_type": ev.block_type,
         })
+    for w in (web_results or []):
+        if w.get("n") in used_w:
+            citations.append({
+                "n": w["n"], "external": True, "title": w["title"],
+                "source": w["source"], "url": w["url"], "year": w.get("year", ""),
+                "snippet": w["summary"][:220], "bboxes": [],
+            })
     return cleaned, citations
 
 
@@ -283,11 +327,14 @@ def stream_answer(conversation_id: str, question: str,
 
     # ---- Agentic 检索循环（流式，工具调用轮的内容作为状态，stop 轮为最终答案）----
     memory_text = _memory_for(question)
+    web_on = get_setting("web_search_enabled", "on") == "on"
+    tools = TOOLS + (WEB_TOOLS if web_on else [])
     messages: list[dict] = [
         {"role": "system", "content": SYSTEM_PROMPT},  # 逐字节稳定，命中前缀缓存
         *_history_messages(conversation_id),
         {"role": "user", "content": _user_message(question, evidences, memory_text)},
     ]
+    web_results: list[dict] = []  # 库外来源，编号 W1..Wn
 
     final_text = ""
     for _ in range(MAX_TOOL_ROUNDS):
@@ -295,7 +342,7 @@ def stream_answer(conversation_id: str, question: str,
         tool_calls: dict[int, dict] = {}
         finish_reason = "stop"
         try:
-            stream = chat(messages, stream=True, tools=TOOLS)
+            stream = chat(messages, stream=True, tools=tools)
             for chunk in stream:
                 if not chunk.choices:
                     continue
@@ -348,7 +395,40 @@ def stream_answer(conversation_id: str, question: str,
                 }}
                 messages.append({"role": "tool", "tool_call_id": tc["id"] or "t0",
                                  "content": result_text})
-            continue
+                continue
+            if tc["name"] == "search_web":
+                try:
+                    args = json.loads(tc["arguments"] or "{}")
+                except json.JSONDecodeError:
+                    args = {}
+                query = str(args.get("query", ""))
+                yield {"event": "tool", "data": {"phase": "start", "query": query,
+                                                "name": "search_web"}}
+                from .web_search import web_search as _web_search
+                found = _web_search(query)
+                new_w = []
+                for w in found:
+                    if any(len({x.lower() for x in re.findall(r"\w{4,}", w["title"])} &
+                               {x.lower() for x in re.findall(r"\w{4,}", u["title"])}) /
+                           max(1, len({x.lower() for x in re.findall(r"\w{4,}", w["title"])} |
+                                      {x.lower() for x in re.findall(r"\w{4,}", u["title"])})) > 0.7
+                           for u in web_results):
+                        continue
+                    w["n"] = f"W{len(web_results) + len(new_w) + 1}"
+                    new_w.append(w)
+                web_results.extend(new_w)
+                yield {"event": "tool", "data": {"phase": "done", "query": query,
+                                                "name": "search_web", "added": len(new_w),
+                                                "total": len(evidences)}}
+                lines = [f"库外检索「{query}」新增 {len(new_w)} 条文献（引用时使用 [W编号]，"
+                         f"并在句中注明这是库外来源）："]
+                for w in new_w:
+                    lines.append(f"[{w['n']}] （{w['source']} {w.get('year','')}）《{w['title']}》"
+                                 f"\n{w['summary'][:800]}\n链接: {w['url']}")
+                messages.append({"role": "tool", "tool_call_id": tc["id"] or "t0",
+                                 "content": "\n\n".join(lines) if new_w else
+                                 f"（在线检索「{query}」无结果或网络不可用。）"})
+                continue
 
         # stop：最终答案
         final_text = buf
@@ -387,7 +467,7 @@ def stream_answer(conversation_id: str, question: str,
         yield {"event": "done", "data": {"refused": True}}
         return
 
-    cleaned, citations = _validate_citations(final_text, evidences)
+    cleaned, citations = _validate_citations(final_text, evidences, web_results)
     _save_assistant(conversation_id, cleaned, citations)
     yield {"event": "citations", "data": {"citations": citations}}
     yield {"event": "done", "data": {"refused": False}}

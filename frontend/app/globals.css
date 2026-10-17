@@ -337,6 +337,12 @@ input:focus, textarea:focus { border-color: var(--accent); }
   user-select: none;
 }
 .cite:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+.cite.ext {
+  background: #fff4e0;
+  color: #9a5b00;
+  border-color: #ecd0a0;
+}
+.cite.ext:hover { background: #e8a33d; color: #fff; border-color: #e8a33d; }
 
 /* 检索过程折叠块（ZCode/Claude 式） */
 .process-block {

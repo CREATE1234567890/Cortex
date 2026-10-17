@@ -13,12 +13,13 @@ export default function SettingsPage() {
   const [memories, setMemories] = useState<{ id: number; kind: string; content: string; created_at: string }[]>([]);
   const [memEnabled, setMemEnabled] = useState(true);
   const [rerankEnabled, setRerankEnabled] = useState(true);
+  const [webEnabled, setWebEnabled] = useState(true);
 
   const loadMemories = () => {
     api.memories().then(r => { setMemories(r.items); setMemEnabled(r.enabled); }).catch(() => {});
   };
   useEffect(() => {
-    api.settings().then(s => { setS(s); setRerankEnabled(s.rerank_enabled === true || s.rerank_enabled === "true"); }).catch(() => {});
+    api.settings().then(s => { setS(s); setRerankEnabled(s.rerank_enabled === true || s.rerank_enabled === "true"); setWebEnabled(s.web_search_enabled === true || s.web_search_enabled === "true"); }).catch(() => {});
     loadMemories();
   }, []);
 
@@ -121,6 +122,25 @@ export default function SettingsPage() {
               }}
             />
             {t("set_rerank_on")}
+          </label>
+        </div>
+
+        <div className="card">
+          <h3>{t("set_web_card")}</h3>
+          <label className="checkbox-row">
+            <input
+              type="checkbox" checked={webEnabled}
+              onChange={async e => {
+                setWebEnabled(e.target.checked);
+                await fetch(`${process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8300"}/api/settings`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ web_search_enabled: e.target.checked ? "on" : "off" }),
+                });
+                toast(t("set_saved"));
+              }}
+            />
+            {t("set_web_on")}
           </label>
         </div>
 

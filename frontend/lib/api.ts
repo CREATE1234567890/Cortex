@@ -1,7 +1,10 @@
 const API = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8300";
 
 export interface Citation {
-  n: number;
+  n: number | string;
+  external?: boolean;
+  source?: string;
+  url?: string;
   chunk_id: number;
   doc_id: string;
   title: string;
@@ -142,7 +145,7 @@ export const api = {
     handlers: {
       onMeta?: (conversationId: string) => void;
       onEvidence?: (evidences: EvidenceInfo[], llmReady: boolean) => void;
-      onTool?: (info: ToolInfo & { phase: string; evidences?: EvidenceInfo[]; total?: number }) => void;
+      onTool?: (info: ToolInfo & { phase: string; name?: string; evidences?: EvidenceInfo[]; total?: number }) => void;
       onDelta?: (text: string) => void;
       onCitations?: (citations: Citation[]) => void;
       onDone?: (info: { refused: boolean }) => void;
@@ -189,8 +192,8 @@ export const api = {
               break;
             }
             case "tool": {
-              const d = data as { phase: string; query: string; added?: number; evidences?: EvidenceInfo[]; total?: number };
-              handlers.onTool?.({ query: d.query, added: d.added ?? null, phase: d.phase, evidences: d.evidences, total: d.total });
+              const d = data as { phase: string; name?: string; query: string; added?: number; evidences?: EvidenceInfo[]; total?: number };
+              handlers.onTool?.({ name: d.name, query: d.query, added: d.added ?? null, phase: d.phase, evidences: d.evidences, total: d.total });
               break;
             }
             case "delta": handlers.onDelta?.((data as { text: string }).text); break;

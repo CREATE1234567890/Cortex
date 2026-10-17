@@ -72,12 +72,12 @@ function splitBlocks(md: string): Chunk[] {
   return chunks;
 }
 
-const INLINE_RE = /(\*\*[^*]+\*\*|\*[^*\n]+\*|`[^`]+`|\[\d{1,2}\])/g;
+const INLINE_RE = /(\*\*[^*]+\*\*|\*[^*\n]+\*|`[^`]+`|\[\d{1,2}\]|\[W\d{1,2}\])/g;
 
 /** 递归渲染行内元素：加粗/斜体内部的 [n] 引用同样转为可点击角标 */
 function renderInline(
   text: string,
-  citations: Map<number, Citation>,
+  citations: Map<string | number, Citation>,
   onCite: (c: Citation) => void,
   keyPrefix: string,
 ): React.ReactNode[] {
@@ -107,8 +107,23 @@ function renderInline(
         </span>
       );
     }
+    const wm = part.match(/^\[W(\d{1,2})\]$/);
+    if (wm) {
+      const cit = citations.get(`W${wm[1]}`);
+      if (!cit) return null; // 未兜底的库外编号不渲染
+      return (
+        <span
+          key={key}
+          className="cite ext"
+          title={`[库外来源] ${cit.title}${cit.source ? " ｜ " + cit.source : ""}`}
+          onClick={e => { e.stopPropagation(); onCite(cit); }}
+        >
+          W{wm[1]}
+        </span>
+      );
+    }
     return <React.Fragment key={key}>{part}</React.Fragment>;
-  });
+});
 }
 
 export default function Markdown({

@@ -11,7 +11,7 @@ interface ChatMsg {
   content: string;
   citations: Citation[];
   evidences: EvidenceInfo[];
-  tools: { query: string; added: number | null }[];
+  tools: { query: string; added: number | null; web?: boolean }[];
   refused?: boolean;
   streaming?: boolean;
   phase?: "searching" | "generating";
@@ -46,9 +46,12 @@ function ProcessBlock({ m, onOpenEvidence }: { m: ChatMsg; onOpenEvidence: (ev: 
         <div className="process-body">
           {m.tools.map((x, j) => (
             <div key={j} className="process-line">
+              {x.web ? "🌐" : "🔍"}{" "}
               {x.added === null
-                ? t("chat_tool_pending", { q: x.query })
-                : t("chat_tool_done", { q: x.query }) + t("chat_tool_added", { n: x.added })}
+                ? (x.web ? `在线检索「${x.query}」…` : t("chat_tool_pending", { q: x.query }))
+                : (x.web
+                    ? `在线检索「${x.query}」＋${x.added} 条库外文献`
+                    : t("chat_tool_done", { q: x.query }) + t("chat_tool_added", { n: x.added }))}
             </div>
           ))}
           {m.evidences.length > 0 && (
@@ -206,15 +209,15 @@ export default function ChatPage() {
           patch(m => ({ ...m, evidences, phase: evidences.length ? "generating" : m.phase }));
           scrollBottom();
         },
-        onTool: (info: ToolInfo & { phase: string; evidences?: EvidenceInfo[]; total?: number }) => {
+        onTool: (info: ToolInfo & { phase: string; name?: string; evidences?: EvidenceInfo[]; total?: number }) => {
           patch(m => {
             if (info.phase === "start") {
-              return { ...m, phase: "generating", tools: [...m.tools, { query: info.query, added: null }] };
+              return { ...m, phase: "generating", tools: [...m.tools, { query: info.query, added: null, web: info.name === "search_web" }] };
             }
             const tools = m.tools.slice();
             for (let i = tools.length - 1; i >= 0; i--) {
               if (tools[i].query === info.query && tools[i].added === null) {
-                tools[i] = { ...tools[i], added: info.added ?? 0 };
+                tools[i] = { ...tools[i], added: info.added ?? 0, web: info.name === "search_web" };
                 break;
               }
             }
@@ -279,6 +282,10 @@ export default function ChatPage() {
   }
 
   function openCitation(c: Citation) {
+    if (c.external) {
+      if (c.url) window.open(c.url, "_blank", "noopener");
+      return;
+    }
     setPdfTarget({
       docId: c.doc_id, title: c.title, page: c.page,
       bboxes: c.bboxes || [], token: Date.now(),

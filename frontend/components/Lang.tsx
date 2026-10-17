@@ -142,6 +142,11 @@ const DICT: Record<string, { zh: string; en: string }> = {
     zh: "开启：对融合后的候选证据用 cross-encoder 精排（更准，CPU 每次问答约多 1–2 秒）",
     en: "On: cross-encoder reranks fused candidates (more accurate, +1–2s per question on CPU)",
   },
+  set_web_card: { zh: "在线学术检索（库外来源）", en: "Online academic search (external sources)" },
+  set_web_on: {
+    zh: "开启：本地证据不足时，自动在 arXiv / Semantic Scholar 检索库外文献，以 [W编号] 琥珀色角标标注（点击跳转原文链接）",
+    en: "On: when local evidence falls short, searches arXiv / Semantic Scholar and marks external findings with amber [W] badges (click to open the source)",
+  },
   set_embed_card: { zh: "嵌入模型", en: "Embedding model" },
   set_embed_now: { zh: "当前：", en: "Current: " },
   set_embed_hint: {
