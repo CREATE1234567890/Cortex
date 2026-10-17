@@ -154,6 +154,8 @@ def init_db():
             conn.execute("ALTER TABLE documents ADD COLUMN venue TEXT")
         if "category" not in cols:
             conn.execute("ALTER TABLE documents ADD COLUMN category TEXT")
+        if "doi" not in cols:
+            conn.execute("ALTER TABLE documents ADD COLUMN doi TEXT")
         conn.executescript(SCHEMA)
         # 重建/补齐全文索引内容（external-content 依据 chunks 表全量灌入）
         cnt = conn.execute("SELECT count(*) c FROM chunks_fts").fetchone()["c"]
