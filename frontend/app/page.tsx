@@ -57,7 +57,7 @@ function ProcessBlock({ m, onOpenEvidence }: { m: ChatMsg; onOpenEvidence: (ev: 
           {m.evidences.length > 0 && (
             <div className="evidence-strip">
               {m.evidences.map(ev => (
-                <EvChip key={ev.n} ev={ev} onOpen={onOpenEvidence} />
+                <EvChip key={ev.chunk_id} ev={ev} onOpen={onOpenEvidence} />
               ))}
             </div>
           )}

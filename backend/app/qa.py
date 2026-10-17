@@ -268,7 +268,11 @@ def _run_search_kb(args: dict, evidences: list[Evidence], seen: set[int],
         return [], "（查询为空，未检索）"
     results = retrieve(query, top_k=k, doc_ids=doc_ids)
     new = [ev for ev in results if ev.chunk_id not in seen]
+    # 全局连续重编号：retrieve() 每次从 [1] 计数，直接追加会产生重复编号，
+    # 导致引用元数据错位与前端 React key 冲突
     for ev in new:
+        # len(evidences) 随 append 自增，不能再叠加 j（否则跳号且与后续轮撞号）
+        ev.n = len(evidences) + 1
         seen.add(ev.chunk_id)
         evidences.append(ev)
     if not new:
