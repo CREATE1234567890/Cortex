@@ -62,6 +62,11 @@ def cancel_job():
     return {"ok": True}
 
 
+@router.post("/library/reembed")
+def reembed():
+    return library.reembed_all()
+
+
 @router.get("/documents")
 def documents():
     return library.list_documents()

@@ -23,6 +23,7 @@ from .classify import classify as classify_doc
 
 _scan_lock = threading.Lock()
 _ingest_thread: threading.Thread | None = None
+_reembed_thread: threading.Thread | None = None
 _stop_event = threading.Event()
 
 
@@ -204,7 +205,17 @@ def process_document(doc_id: str) -> bool:
             raise RuntimeError(f"处理超时（>{_DOC_TIMEOUT_S}s，疑似病理 PDF），已强制终止子进程")
 
         chunks = payload["chunks"]
-        vectors = payload["vectors"]
+        title = _valid_title(payload["title"], doc["filename"])
+        category, venue = classify_doc(
+            doc["pdf_path"], config.get_kb_root(), payload["title"] or "")
+        # Contextual Retrieval（机械版）：嵌入文本带文档级前缀，提升跨文档区分度
+        ctx_head = f"《{title}》"
+        if venue:
+            ctx_head += f" {venue}"
+        if payload["year"]:
+            ctx_head += f" {payload['year']}"
+        texts = [f"{ctx_head} | {c['text']}" for c in chunks]
+        vectors = embed_passages(texts)
 
         index = get_index()
         # 先按现存 chunk id 清理旧向量，再重写（FTS 由触发器随 chunks 行同步）
@@ -228,13 +239,10 @@ def process_document(doc_id: str) -> bool:
                      c["block_type"]),
                 )
                 new_ids.append(cur.lastrowid)
-            category, venue = classify_doc(
-                doc["pdf_path"], config.get_kb_root(), payload["title"] or "")
             conn.execute(
                 "UPDATE documents SET status='indexed', n_pages=?, n_chunks=?, error=NULL, "
                 "indexed_at=datetime('now'), title=?, year=?, venue=?, category=? WHERE id=?",
-                (payload["n_pages"], len(chunks),
-                 _valid_title(payload["title"], doc["filename"]),
+                (payload["n_pages"], len(chunks), title,
                  payload["year"], venue or None, category or None, doc_id),
             )
         index.append(new_ids, vectors)
@@ -294,3 +302,49 @@ def _ingest_worker(doc_ids: list[str]):
 
 def cancel_ingest():
     _stop_event.set()
+
+
+def reembed_all() -> dict:
+    """全量重嵌入：上下文前缀变更/换嵌入模型后重建向量。服务进程内后台执行。"""
+    global _reembed_thread
+    with _scan_lock:
+        if _reembed_thread and _reembed_thread.is_alive():
+            return {"started": False, "reason": "重嵌入已在运行"}
+
+        def worker():
+            try:
+                with db() as conn:
+                    docs = conn.execute(
+                        "SELECT id, title, venue, year FROM documents WHERE status='indexed'"
+                    ).fetchall()
+                total = len(docs)
+                _set_job(state="running", total=total, done=0, failed=0,
+                         message="全量重嵌入", current_file="")
+                index = get_index()
+                for i, d in enumerate(docs, 1):
+                    _set_job(current_file=f"重嵌入 {i}/{total}: {d['title'][:40]}")
+                    with db() as conn:
+                        rows = conn.execute(
+                            "SELECT id, text FROM chunks WHERE doc_id=? ORDER BY seq", (d["id"],)
+                        ).fetchall()
+                    if not rows:
+                        continue
+                    ctx = f"《{d['title']}》"
+                    if d["venue"]:
+                        ctx += f" {d['venue']}"
+                    if d["year"]:
+                        ctx += f" {d['year']}"
+                    ids = [r["id"] for r in rows]
+                    texts = [f"{ctx} | {r['text']}" for r in rows]
+                    vectors = embed_passages(texts)
+                    index.remove_ids(set(ids))
+                    index.append(ids, vectors)
+                    _set_job(done=i)
+                index.save()
+                _set_job(state="done", current_file="", message=f"重嵌入完成：{total} 篇")
+            except Exception as e:
+                _set_job(state="error", message=f"重嵌入失败：{type(e).__name__}: {e}"[:300])
+
+        _reembed_thread = threading.Thread(target=worker, daemon=True, name="cortex-reembed")
+        _reembed_thread.start()
+        return {"started": True}

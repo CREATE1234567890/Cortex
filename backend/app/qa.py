@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import uuid
 from collections.abc import Generator
 
@@ -52,18 +53,18 @@ TOOLS = [{
     },
 }]
 
+# KV-cache 友好设计：system + 工具定义逐字节稳定（无任何插值），
+# 动态内容（记忆/证据块/编号上限）全部放在对话尾部的 user 消息里，
+# 使服务商前缀缓存可以跨轮、跨提问复用。
 SYSTEM_PROMPT = """你是 Cortex，一个严谨的个人科研文献库问答助手。你的回答必须遵守以下规则：
 
-1. **只依据证据回答**：仅使用 <context> 中编号 [1]–[{max_n}] 的证据块回答问题，不使用任何库外知识。
-2. **句级引用**：每个事实性论断的句尾必须紧跟引用编号，如"……提升分割精度 [2]。"。多个来源可并列引用，如 [1][3]。
+1. **只依据证据回答**：仅使用本对话中给出的编号证据块（如 [2]、[7]）回答问题，不使用任何库外知识。
+2. **句级引用**：每个事实性论断的句尾必须紧跟引用编号，如"……提升分割精度 [2]。"。多个来源可并列引用，如 [1][3]。不得引用未出现过的编号。
 3. **诚实拒答**：若证据不足以回答，直接说明"库中未找到足够的相关证据"，并简述已检索到的最接近内容是什么。绝不允许编造或猜测。
 4. **忠实原文**：引用证据时保留原意，不夸大、不脑补数字。证据中的表格数据可引用并注明来源编号。
 5. **语言**：用用户提问的语言回答；术语首次出现可附英文原文。
-6. 格式：用 Markdown；适当分点；不要输出 <context> 标签本身。"""
-
-TOOL_RULE = """
-7. **补充检索工具**：你可以调用 search_kb 工具在库中检索更多证据。仅在现有证据明显不足时使用；
-   每次换更精确的查询词；最多调用 {max_rounds} 次。最终回答仍只允许引用上文编号体系中的证据。"""
+6. 格式：用 Markdown；适当分点；不要输出 <context> 标签本身。
+7. **补充检索工具**：你可以调用 search_kb 工具在库中检索更多证据。仅在现有证据明显不足时使用；每次换更精确的查询词；最多调用 3 次。最终回答仍只允许引用上文编号体系中的证据。"""
 
 MEMORY_BLOCK = """<memory>
 以下是关于用户的长期记忆（仅供个性化参考，不是文献证据，禁止为其中内容添加引用编号）：
@@ -140,7 +141,7 @@ def _validate_citations(text: str, evidences: list[Evidence]) -> tuple[str, list
 
 
 def _history_messages(conversation_id: str) -> list[dict]:
-    """多轮：取最近 N 轮历史。"""
+    """多轮：滚动摘要（如有）+ 最近 N 轮原文。摘要消息放在最前，之后保持追加式稳定。"""
     turns = get_setting("history_turns", str(config.HISTORY_TURNS))
     try:
         n = max(0, int(turns))
@@ -148,21 +149,30 @@ def _history_messages(conversation_id: str) -> list[dict]:
         n = config.HISTORY_TURNS
     msgs: list[dict] = []
     with db() as conn:
+        row = conn.execute("SELECT summary FROM conversations WHERE id=?",
+                           (conversation_id,)).fetchone()
+        summary = row["summary"] if row else None
         rows = conn.execute(
             "SELECT role, content FROM messages WHERE conversation_id=? "
             "ORDER BY id DESC LIMIT ?", (conversation_id, n * 2),
         ).fetchall()
+    if summary:
+        msgs.append({"role": "system",
+                     "content": f"（此前对话的滚动摘要，供延续语境）\n{summary}"})
     for r in reversed(rows):
         msgs.append({"role": r["role"], "content": r["content"][:6000]})
     return msgs
 
 
-def _system_prompt(n_evidence: int, memory_text: str | None) -> str:
-    prompt = SYSTEM_PROMPT.replace("{max_n}", str(n_evidence)) + TOOL_RULE.replace(
-        "{max_rounds}", str(MAX_TOOL_ROUNDS))
+def _user_message(question: str, evidences: list[Evidence], memory_text: str | None) -> str:
+    """动态尾部：记忆 + 证据块 + 问题。system 与工具定义保持逐字节稳定。"""
+    parts = []
     if memory_text:
-        prompt += "\n" + MEMORY_BLOCK.replace("{memories}", memory_text)
-    return prompt
+        parts.append(MEMORY_BLOCK.replace("{memories}", memory_text))
+    parts.append(EVIDENCE_BLOCK.format(blocks=_format_evidence_blocks(evidences) or "（初始检索无结果）"))
+    parts.append(f"<question>{question}</question>")
+    parts.append(f"（当前共有编号 [1]–[{len(evidences)}] 的证据块，补充检索可能增加编号。）")
+    return "\n\n".join(parts)
 
 
 def evidence_only_answer(question: str, evidences: list[Evidence]) -> str:
@@ -269,16 +279,13 @@ def stream_answer(conversation_id: str, question: str,
     # ---- Agentic 检索循环（流式，工具调用轮的内容作为状态，stop 轮为最终答案）----
     memory_text = _memory_for(question)
     messages: list[dict] = [
-        {"role": "system", "content": _system_prompt(len(evidences), memory_text)},
+        {"role": "system", "content": SYSTEM_PROMPT},  # 逐字节稳定，命中前缀缓存
         *_history_messages(conversation_id),
-        {"role": "user", "content":
-            EVIDENCE_BLOCK.format(blocks=_format_evidence_blocks(evidences) or "（初始检索无结果）")
-            + f"\n\n<question>{question}</question>"},
+        {"role": "user", "content": _user_message(question, evidences, memory_text)},
     ]
 
     final_text = ""
     for _ in range(MAX_TOOL_ROUNDS):
-        messages[0] = {"role": "system", "content": _system_prompt(len(evidences), memory_text)}
         buf = ""
         tool_calls: dict[int, dict] = {}
         finish_reason = "stop"
@@ -344,7 +351,6 @@ def stream_answer(conversation_id: str, question: str,
 
     if not final_text:
         # 预算耗尽时模型仍在请求工具 → 强制做一次无工具的最终生成
-        messages[0] = {"role": "system", "content": _system_prompt(len(evidences), memory_text)}
         messages.append({"role": "user", "content":
             "（检索预算已用完）请立即基于现有证据回答上述问题；"
             "若证据确实不足，请明确说明库中未找到足够证据。"})
@@ -385,6 +391,7 @@ def stream_answer(conversation_id: str, question: str,
     if cleaned and not cleaned.startswith("**库中未找到"):
         from .memory import extract_async
         extract_async(conversation_id, question, cleaned)
+        maybe_summarize_async(conversation_id)
 
 
 def _save_assistant(conversation_id: str, content: str, citations: list[dict]):
@@ -393,6 +400,49 @@ def _save_assistant(conversation_id: str, content: str, citations: list[dict]):
             "INSERT INTO messages(conversation_id, role, content, citations) VALUES (?, 'assistant', ?, ?)",
             (conversation_id, content, json.dumps(citations, ensure_ascii=False)),
         )
+
+
+def maybe_summarize_async(conversation_id: str):
+    """滚动摘要（上下文工程 Compaction）：超出窗口的旧轮次用 LLM 压实成要点，
+    与已有摘要合并；最近 HISTORY_TURNS*2 条始终保留原文。后台线程，失败静默。"""
+
+    def _run():
+        try:
+            from .llm import chat_text
+            keep = config.HISTORY_TURNS * 2
+            with db() as conn:
+                row = conn.execute(
+                    "SELECT summary, summarized_until, "
+                    "(SELECT MAX(id) FROM messages WHERE conversation_id=c.id) max_id "
+                    "FROM conversations c WHERE c.id=?", (conversation_id,)).fetchone()
+                if not row:
+                    return
+                until = row["summarized_until"] or 0
+                overflow = conn.execute(
+                    "SELECT role, content FROM messages WHERE conversation_id=? "
+                    "AND id > ? AND id <= ? - ? ORDER BY id",
+                    (conversation_id, until, row["max_id"] or 0, keep)).fetchall()
+            if len(overflow) < 2:
+                return
+            transcript = "\n".join(f"{'用户' if r['role'] == 'user' else '助手'}: {r['content'][:800]}"
+                                   for r in overflow)[:6000]
+            prev = row["summary"] or "（无）"
+            out = chat_text([{"role": "user", "content":
+                f"把以下对话片段压缩为要点摘要（150 字以内），保留：研究主题、提到的论文/方法/数据集、"
+                f"未解决的问题、用户偏好。与已有摘要合并去重，直接输出摘要正文。\n\n"
+                f"【已有摘要】\n{prev}\n\n【新对话片段】\n{transcript}"}], temperature=0)
+            out = out.strip()[:800]
+            if not out:
+                return
+            max_id = row["max_id"] or 0
+            new_until = (max_id - keep) if max_id > keep else 0
+            with db() as conn:
+                conn.execute("UPDATE conversations SET summary=?, summarized_until=? WHERE id=?",
+                             (out, new_until, conversation_id))
+        except Exception:
+            pass
+
+    threading.Thread(target=_run, daemon=True, name="cortex-summary").start()
 
 
 def new_conversation(title: str = "新对话") -> str:

@@ -156,6 +156,12 @@ def init_db():
             conn.execute("ALTER TABLE documents ADD COLUMN category TEXT")
         if "doi" not in cols:
             conn.execute("ALTER TABLE documents ADD COLUMN doi TEXT")
+        # 会话滚动摘要（上下文工程：老轮次压缩，最近轮次保留原文）
+        ccols = {r["name"] for r in conn.execute("PRAGMA table_info(conversations)")}
+        if "summary" not in ccols:
+            conn.execute("ALTER TABLE conversations ADD COLUMN summary TEXT")
+        if "summarized_until" not in ccols:
+            conn.execute("ALTER TABLE conversations ADD COLUMN summarized_until INTEGER DEFAULT 0")
         conn.executescript(SCHEMA)
         # 重建/补齐全文索引内容（external-content 依据 chunks 表全量灌入）
         cnt = conn.execute("SELECT count(*) c FROM chunks_fts").fetchone()["c"]
