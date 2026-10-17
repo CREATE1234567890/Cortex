@@ -395,6 +395,7 @@ export default function ChatPage() {
         {/* 聊天主区 */}
         <div className="chat-main">
           <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}>
+          <div className="chat-inner">
             {messages.length === 0 && (
               <div className="empty-state">
                 <div className="big">🧠</div>
@@ -414,7 +415,7 @@ export default function ChatPage() {
             )}
             {messages.map((m, i) => (
               <div key={i} className={`msg ${m.role}`}>
-                <div className="role">{m.role === "user" ? t("role_you") : t("role_cortex")}</div>
+                {m.role === "assistant" && <div className="role">{t("role_cortex")}</div>}
 
                 {m.role === "assistant" && (
                   <ProcessBlock m={m} onOpenEvidence={openEvidence} />
@@ -449,6 +450,7 @@ export default function ChatPage() {
               </div>
             ))}
           </div>
+          </div>
           <div className="chat-input-area">
             {scopeDocs.length > 0 && (
               <div className="scope-chips">
@@ -463,6 +465,26 @@ export default function ChatPage() {
               </div>
             )}
             <div className="chat-input-box">
+              <button
+                className="composer-add"
+                title={t("chat_mention_head")}
+                onClick={() => {
+                  const el = taRef.current;
+                  if (!el) return;
+                  const v = el.value;
+                  const caret = el.selectionStart ?? v.length;
+                  const left = v.slice(0, caret).replace(/\s+$/, "");
+                  const right = v.slice(caret);
+                  const nextV = `${left} @${right}`;
+                  setInput(nextV);
+                  const caretPos = left.length + 2;
+                  requestAnimationFrame(() => {
+                    const el2 = taRef.current;
+                    if (el2) { el2.focus(); el2.selectionStart = el2.selectionEnd = caretPos; }
+                    detectMention(nextV.slice(0, caretPos));
+                  });
+                }}
+              >＋</button>
               <textarea
                 ref={taRef}
                 rows={1}
@@ -488,11 +510,10 @@ export default function ChatPage() {
                 autoFocus
               />
               {busy ? (
-                <button className="stop-btn" onClick={stop} title={t("chat_stop")}>{t("chat_stop")}</button>
+                <button className="stop-btn" onClick={stop} title={t("chat_stop")}>■</button>
               ) : (
-                <button className="primary send-btn" onClick={() => send()} disabled={!input.trim()}>
-                  {t("chat_send")}
-                </button>
+                <button className="primary send-btn" onClick={() => send()} disabled={!input.trim()}
+                        title={t("chat_send")}>↑</button>
               )}
               {mention && mentionCandidates.length > 0 && (
                 <div className="mention-dropdown">
